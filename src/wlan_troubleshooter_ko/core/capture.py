@@ -50,8 +50,12 @@ def _reject_non_local_path(raw_path: str) -> None:
 def _is_link_or_reparse(path: Path) -> bool:
     try:
         metadata = path.lstat()
-    except OSError:
-        return False
+    except (OSError, ValueError):
+        raise CaptureValidationError("파일 경로를 안전하게 확인할 수 없습니다.") from None
+    return _stat_is_link_or_reparse(metadata)
+
+
+def _stat_is_link_or_reparse(metadata: os.stat_result) -> bool:
     attributes = getattr(metadata, "st_file_attributes", 0) or 0
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     return stat.S_ISLNK(metadata.st_mode) or bool(attributes & reparse_flag)
@@ -100,6 +104,48 @@ def _same_file_state(first: os.stat_result, second: os.stat_result) -> bool:
     )
 
 
+def _open_regular_readonly(path: Path):
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        return os.fdopen(descriptor, "rb")
+    except (OSError, ValueError):
+        os.close(descriptor)
+        raise
+
+
+def _stable_file_stats(path: Path, handle: BinaryIO) -> os.stat_result:
+    """경로 안전성과 현재 열린 파일의 정체성을 재개방 핸들로 확인한다.
+
+    Windows의 경로 기반 stat fast path는 일반 파일에서도 ``st_dev``와
+    ``st_ino`` 같은 파일 ID 필드를 0으로 돌려줄 수 있다. 따라서 경로
+    stat은 링크/reparse point와 파일 형식 확인에만 사용하고, 파일의
+    정체성과 상태는 현재 핸들과 같은 경로를 다시 연 핸들의 fstat끼리
+    비교한다.
+    """
+
+    path_before = os.lstat(path)
+    handle_stat = os.fstat(handle.fileno())
+    _reject_linked_components(path)
+    with _open_regular_readonly(path) as reopened_handle:
+        reopened_stat = os.fstat(reopened_handle.fileno())
+    _reject_linked_components(path)
+    path_after = os.lstat(path)
+    if (
+        _stat_is_link_or_reparse(path_before)
+        or _stat_is_link_or_reparse(path_after)
+        or _stat_is_link_or_reparse(handle_stat)
+        or _stat_is_link_or_reparse(reopened_stat)
+        or not stat.S_ISREG(path_before.st_mode)
+        or not stat.S_ISREG(path_after.st_mode)
+        or not stat.S_ISREG(handle_stat.st_mode)
+        or not stat.S_ISREG(reopened_stat.st_mode)
+        or not _same_file_state(handle_stat, reopened_stat)
+    ):
+        raise CaptureValidationError("파일이 확인 중 교체됐습니다.")
+    return handle_stat
+
+
 def sha256_file(
     path: Path,
     chunk_size: int = 1024 * 1024,
@@ -134,11 +180,11 @@ def validate_capture(
     if suffix not in {".pcap", ".pcapng"}:
         raise CaptureValidationError(".pcap 또는 .pcapng 파일만 선택할 수 있습니다.")
     try:
-        resolved = candidate.resolve(strict=True)
-        with resolved.open("rb") as handle:
-            metadata = os.fstat(handle.fileno())
-            if not stat.S_ISREG(metadata.st_mode):
-                raise CaptureValidationError("일반 파일만 분석할 수 있습니다.")
+        # 해석된 별도 경로를 다시 여는 대신, 링크 검사를 마친 원래 절대
+        # 경로를 열고 그 경로가 같은 핸들을 가리키는지 반복 확인한다.
+        resolved = candidate
+        with _open_regular_readonly(resolved) as handle:
+            metadata = _stable_file_stats(resolved, handle)
             if cancel_event is not None and cancel_event.is_set():
                 raise CaptureValidationError("파일 확인이 취소됐습니다.")
             header = handle.read(28)
@@ -180,16 +226,19 @@ def validate_capture(
                 raise CaptureValidationError("지원하는 PCAP/PCAPNG 파일 매직이 아닙니다.")
 
             digest = _sha256_handle(handle, cancel_event, 1024 * 1024)
-            final_open_metadata = os.fstat(handle.fileno())
+            final_open_metadata = _stable_file_stats(resolved, handle)
             if not _same_file_state(metadata, final_open_metadata):
                 raise CaptureValidationError("파일이 확인 중 변경됐습니다.")
-        path_metadata = resolved.stat()
+        # 원본 핸들이 닫힌 뒤에도 경로가 같은 파일을 가리키는지 확인한다.
+        # Windows의 불완전한 path stat 대신 재개방 핸들의 fstat를 사용한다.
+        with _open_regular_readonly(resolved) as final_path_handle:
+            final_path_metadata = _stable_file_stats(resolved, final_path_handle)
+        if not _same_file_state(metadata, final_path_metadata):
+            raise CaptureValidationError("파일이 확인 중 교체됐습니다.")
     except CaptureValidationError:
         raise
     except OSError:
         raise CaptureValidationError("캡처 파일을 안전하게 읽을 수 없습니다.") from None
-    if not _same_file_state(metadata, path_metadata):
-        raise CaptureValidationError("파일이 확인 중 교체됐습니다.")
     return CaptureInfo(
         path=resolved,
         capture_format=capture_format,

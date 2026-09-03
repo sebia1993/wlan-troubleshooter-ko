@@ -8,7 +8,7 @@
 |---|---|---|
 | Phase 0 저장소·보안 기반 | 구현 완료·Windows 검증 대기 | 문서, ADR, 커밋 차단, 감사 도구 |
 | Phase 1 최소 앱·안전 경계 | 구현 완료·Windows 검증 대기 | Tkinter, 입력 검증, 임시공간, 마스킹, TShark 정책, HTML 검사 |
-| 로컬 macOS 보조 검증 | 통과 | macOS Python 3.9.6에서 컴파일, 단위 테스트 139개, 소스 감사 27개 파일, 자체 점검 통과 |
+| 로컬 macOS 보조 검증 | 통과 | macOS Python 3.9.6에서 컴파일, 단위 테스트 146개, 소스 감사 27개 파일, 자체 점검 통과 |
 | staged 저장소 감사 | 통과 | 의도한 50개 파일의 Git index blob을 감사해 실제 캡처·민감 산출물·바이너리 없음 확인 |
 | Windows GitHub Actions | 대기 | 최초 푸시 후 `windows-latest` 결과 기록 예정 |
 | 승인된 Portable TShark | 미제공 | 실행 파일·해시·내부 승인 자료 없음 |
