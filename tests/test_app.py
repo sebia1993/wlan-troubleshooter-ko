@@ -1,3 +1,4 @@
+import json
 import struct
 import tempfile
 import threading
@@ -5,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wlan_troubleshooter_ko.app import self_check
+from wlan_troubleshooter_ko.app import main, self_check
 from wlan_troubleshooter_ko.ui.main_window import CaptureViewModel, MainWindow
 
 
@@ -16,13 +17,30 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "2B")
+        self.assertEqual(result["phase"], "3")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["field_profile_version"], "0.2.0")
         self.assertEqual(result["inventory_field_count"], "5")
         self.assertEqual(result["protocol_group_count"], "12")
+        self.assertEqual(result["python_external_required"], "true")
+        self.assertEqual(result["tshark_external_required"], "true")
         self.assertIn("프로토콜 인벤토리", result["analysis_features"])
+
+    def test_self_check_can_write_new_local_json_for_windowed_exe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory).resolve() / "self-check.json"
+            result = main(["--self-check-output=" + str(output)])
+            self.assertEqual(result, 0)
+            value = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(value["network_features"], "없음")
+            self.assertEqual(value["python_external_required"], "true")
+            with self.assertRaises(FileExistsError):
+                main(["--self-check-output=" + str(output)])
+
+    def test_self_check_rejects_non_local_output(self):
+        with self.assertRaises(ValueError):
+            main(["--self-check-output=https://example.invalid/output.json"])
 
     def test_view_model_does_not_need_tk_root(self):
         with tempfile.TemporaryDirectory() as directory:
