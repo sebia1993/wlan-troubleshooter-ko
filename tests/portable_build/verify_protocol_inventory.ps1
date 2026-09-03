@@ -27,7 +27,7 @@ function Write-SafeFailureSummary {
     param([Parameter(Mandatory = $true)][string]$ResultPath)
 
     if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
-        Write-Host "Portable inventory state: result file was not created"
+        Write-Host "Portable analysis state: result file was not created"
         return
     }
     try {
@@ -40,11 +40,11 @@ function Write-SafeFailureSummary {
         if ($Message.Length -gt 500) {
             $Message = $Message.Substring(0, 500)
         }
-        Write-Host "Portable inventory state: $State"
-        Write-Host "Portable inventory message: $Message"
+        Write-Host "Portable analysis state: $State"
+        Write-Host "Portable analysis message: $Message"
     }
     catch {
-        Write-Host "Portable inventory state: unreadable-result"
+        Write-Host "Portable analysis state: unreadable-result"
     }
 }
 
@@ -70,7 +70,7 @@ if ((Split-Path -Leaf $Archive) -ne $ExpectedArchiveName) {
     throw "Portable archive name does not match release metadata."
 }
 
-$WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-inventory-test-" + [guid]::NewGuid().ToString("N"))
+$WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-event-test-" + [guid]::NewGuid().ToString("N"))
 $Expanded = Join-Path $WorkRoot "portable"
 $Capture = Join-Path $WorkRoot "private-integration-capture.pcap"
 $Output = Join-Path $WorkRoot "analysis-result.json"
@@ -80,6 +80,9 @@ try {
     $BuildInfo = Get-Content -LiteralPath (Join-Path $Expanded "BUILD_INFO.json") -Raw | ConvertFrom-Json -Depth 32
     if ($BuildInfo.product_version -ne $ExpectedProductVersion -or $BuildInfo.protocol_inventory_runtime -ne "enabled") {
         throw "Portable BUILD_INFO does not describe the enabled protocol inventory runtime."
+    }
+    if ($BuildInfo.event_correlation_runtime -ne "enabled") {
+        throw "Portable BUILD_INFO does not describe the enabled event correlation runtime."
     }
 
     & $PythonPath (Join-Path $PSScriptRoot "generate_inventory_fixture.py") --output $Capture
@@ -106,7 +109,7 @@ try {
         $Process = Start-Process -FilePath $Application -ArgumentList $Arguments -WorkingDirectory $Expanded -Wait -PassThru
         if ($Process.ExitCode -ne 0) {
             Write-SafeFailureSummary -ResultPath $Output
-            throw "Portable protocol inventory process failed with exit code $($Process.ExitCode)."
+            throw "Portable connection analysis process failed with exit code $($Process.ExitCode)."
         }
     }
     finally {
@@ -116,30 +119,53 @@ try {
     }
 
     if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) {
-        throw "Portable protocol inventory did not create its result."
+        throw "Portable connection analysis did not create its result."
     }
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 64
-    if ($Result.protocol_inventory_state -ne "completed") {
+    if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
         Write-SafeFailureSummary -ResultPath $Output
-        throw "Portable protocol inventory did not complete."
+        throw "Portable connection analysis did not complete with schema version 2."
     }
-    if ($Result.protocol_inventory.inventory.frames_observed -ne 2) {
+    if ($Result.protocol_inventory.inventory.frames_observed -ne 5) {
         throw "Portable protocol inventory observed an unexpected frame count."
     }
     if ($Result.protocol_inventory.inventory.complete -ne $true) {
         throw "Portable protocol inventory was not marked complete."
     }
     $Groups = @($Result.protocol_inventory.inventory.observations | ForEach-Object { $_.group_id })
-    if ($Groups -notcontains "arp" -or $Groups -notcontains "dns") {
-        throw "Portable protocol inventory did not observe the synthetic ARP and DNS frames."
+    foreach ($ExpectedGroup in @("arp", "dns", "tcp")) {
+        if ($Groups -notcontains $ExpectedGroup) {
+            throw "Portable protocol inventory did not observe the expected group: $ExpectedGroup"
+        }
     }
+
+    $Correlation = $Result.protocol_inventory.event_correlation
+    if ($null -eq $Correlation -or $Correlation.complete -ne $true -or $Correlation.frames_scanned -ne 5) {
+        throw "Portable event correlation did not process the complete synthetic capture."
+    }
+    $Findings = @($Correlation.findings)
+    $FindingIds = @($Findings | ForEach-Object { $_.rule_id })
+    foreach ($ExpectedFinding in @("DNS-ERROR-RESPONSE", "TCP-RST")) {
+        if ($FindingIds -notcontains $ExpectedFinding) {
+            throw "Portable event correlation did not create the expected Finding: $ExpectedFinding"
+        }
+        $Finding = $Findings | Where-Object { $_.rule_id -eq $ExpectedFinding } | Select-Object -First 1
+        if ($Finding.classification -ne "확정") {
+            throw "Portable explicit failure Finding is not classified as confirmed: $ExpectedFinding"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$Finding.display_filter) -or @($Finding.evidence_frames).Count -lt 1) {
+            throw "Portable Finding does not contain packet evidence: $ExpectedFinding"
+        }
+    }
+
     if (
         $Raw.Contains($Capture, [System.StringComparison]::OrdinalIgnoreCase) -or
         $Raw.Contains((Split-Path -Leaf $Capture), [System.StringComparison]::OrdinalIgnoreCase) -or
-        $Raw.Contains("192.0.2.1", [System.StringComparison]::OrdinalIgnoreCase)
+        $Raw.Contains("192.0.2.1", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Raw.Contains("example.test", [System.StringComparison]::OrdinalIgnoreCase)
     ) {
-        throw "Portable analysis result exposed a capture path, name, or packet identifier."
+        throw "Portable analysis result exposed a capture path, name, address, or DNS query."
     }
 
     $AfterFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
@@ -148,7 +174,7 @@ try {
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
         throw "Portable analysis modified its distribution directory."
     }
-    Write-Host "Portable protocol inventory integration test passed."
+    Write-Host "Portable DNS NXDOMAIN and TCP RST Finding integration test passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
