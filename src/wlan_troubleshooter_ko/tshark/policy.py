@@ -75,10 +75,7 @@ def _canonical_fields(field_values: List[str]) -> List[str]:
         raise TSharkPolicyError("승인되지 않은 TShark 필드입니다.")
     if len(field_values) != len(set(field_values)):
         raise TSharkPolicyError("중복 TShark 필드를 사용할 수 없습니다.")
-    canonical = [field for field in APPROVED_FIELDS if field in field_values]
-    if field_values != canonical:
-        raise TSharkPolicyError("TShark 필드는 중복 없이 고정 순서여야 합니다.")
-    return canonical
+    return [field for field in APPROVED_FIELDS if field in field_values]
 
 
 def _read_field_pairs(arguments: List[str], start: int) -> List[str]:
@@ -89,7 +86,10 @@ def _read_field_pairs(arguments: List[str], start: int) -> List[str]:
         if arguments[index] != "-e" or not isinstance(arguments[index + 1], str):
             raise TSharkPolicyError("승인되지 않은 TShark 필드 인자입니다.")
         values.append(arguments[index + 1])
-    return _canonical_fields(values)
+    canonical = _canonical_fields(values)
+    if values != canonical:
+        raise TSharkPolicyError("TShark 필드는 중복 없이 고정 순서여야 합니다.")
+    return canonical
 
 
 def assert_safe_argv(arguments: List[str]) -> None:
