@@ -160,6 +160,13 @@ _SUBPROCESS_CALLS = {
     "subprocess.run",
 }
 
+_PROCESS_REFLECTION_CALLS = {
+    "builtins.getattr",
+    "builtins.vars",
+    "getattr",
+    "vars",
+}
+
 _ASYNCIO_NETWORK_METHODS = {
     "connect_accepted_socket",
     "create_connection",
@@ -475,6 +482,28 @@ class _PythonVisitor(ast.NodeVisitor):
             "src/wlan_troubleshooter_ko/tshark/runner.py",
         }
 
+    def _is_subprocess_module_reference(self, node: ast.AST) -> bool:
+        name = _call_name(node)
+        return bool(name and self._resolve_name(name) == "subprocess")
+
+    def _is_subprocess_reflection(self, node: ast.AST) -> bool:
+        if not isinstance(node, ast.Call) or not node.args:
+            return False
+        callable_name = self._callable_name(node.func)
+        return (
+            callable_name in _PROCESS_REFLECTION_CALLS
+            and self._is_subprocess_module_reference(node.args[0])
+        )
+
+    def _is_subprocess_namespace_mapping(self, node: ast.AST) -> bool:
+        if self._is_subprocess_reflection(node):
+            return True
+        return (
+            isinstance(node, ast.Attribute)
+            and node.attr == "__dict__"
+            and self._is_subprocess_module_reference(node.value)
+        )
+
     def _check_runtime_import(self, node: ast.AST, module_name: str) -> None:
         runtime_path = self.display_path.replace("\\", "/")
         if not runtime_path.startswith("src/"):
@@ -600,6 +629,12 @@ class _PythonVisitor(ast.NodeVisitor):
         self._check_static_string(node)
         name = self._callable_name(node.func)
         syntactic_name = _call_name(node.func)
+        if self._process_import_is_approved() and self._is_subprocess_reflection(node):
+            self._add(
+                node,
+                "UNAPPROVED_PROCESS_REFERENCE",
+                "reflective subprocess module access is forbidden",
+            )
         if syntactic_name in _SUBPROCESS_CALLS:
             self._direct_process_call_nodes.add(id(node.func))
         if name in _FORBIDDEN_CALLS:
@@ -681,6 +716,18 @@ class _PythonVisitor(ast.NodeVisitor):
                         )
                         break
 
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        if (
+            self._process_import_is_approved()
+            and self._is_subprocess_namespace_mapping(node.value)
+        ):
+            self._add(
+                node,
+                "UNAPPROVED_PROCESS_REFERENCE",
+                "subscripted subprocess namespace access is forbidden",
+            )
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:

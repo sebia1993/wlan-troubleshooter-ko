@@ -58,6 +58,29 @@ def write_bundle(root: Path, executable_content=b"binary"):
     (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def windows_fast_lstat_without_file_identity(original_lstat):
+    """Windows 경로 fast-path처럼 일반 파일의 비보장 필드를 0으로 만든다."""
+
+    def incomplete_lstat(path):
+        file_stat = original_lstat(path)
+        if not stat.S_ISREG(file_stat.st_mode):
+            return file_stat
+        return mock.Mock(
+            st_dev=0,
+            st_ino=0,
+            st_mode=file_stat.st_mode,
+            st_nlink=0,
+            st_size=file_stat.st_size,
+            st_mtime=file_stat.st_mtime,
+            st_ctime=file_stat.st_ctime,
+            st_mtime_ns=file_stat.st_mtime_ns,
+            st_ctime_ns=file_stat.st_ctime_ns,
+            st_file_attributes=getattr(file_stat, "st_file_attributes", 0) or 0,
+        )
+
+    return incomplete_lstat
+
+
 class TSharkPolicyTests(unittest.TestCase):
     def test_manifest_and_analysis_arguments_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -292,6 +315,43 @@ class TSharkPolicyTests(unittest.TestCase):
         self.assertFalse(manifest_module._stat_is_link_or_reparse(regular_stat))
         self.assertFalse(runner_module._stat_is_link_or_reparse(regular_stat))
 
+    def test_windows_incomplete_path_stat_uses_handle_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            write_bundle(root)
+            original_lstat = manifest_module.os.lstat
+            with mock.patch.object(
+                manifest_module.os,
+                "lstat",
+                side_effect=windows_fast_lstat_without_file_identity(original_lstat),
+            ):
+                bundle = verify_bundle(root)
+                manifest_module.revalidate_bundle_snapshot(bundle)
+
+            self.assertEqual(bundle.manifest_snapshot[3], 1)
+            self.assertTrue(
+                all(snapshot[3] == 1 for _path, snapshot in bundle.file_snapshots)
+            )
+
+    def test_windows_incomplete_path_stat_still_rejects_hardlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            root = base / "vendor"
+            root.mkdir()
+            write_bundle(root)
+            try:
+                os.link(root / "tshark.exe", base / "outside-alias.exe")
+            except (OSError, NotImplementedError):
+                self.skipTest("hardlink creation is unavailable on this runner")
+            original_lstat = manifest_module.os.lstat
+            with mock.patch.object(
+                manifest_module.os,
+                "lstat",
+                side_effect=windows_fast_lstat_without_file_identity(original_lstat),
+            ):
+                with self.assertRaises(BundleVerificationError):
+                    verify_bundle(root)
+
     def test_hash_rejects_file_state_change_between_handle_checks(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory).resolve() / "payload.bin"
@@ -312,7 +372,7 @@ class TSharkPolicyTests(unittest.TestCase):
             with mock.patch.object(
                 manifest_module.os,
                 "fstat",
-                side_effect=(original, changed),
+                side_effect=(original, original, changed, changed),
             ):
                 with self.assertRaises(BundleVerificationError):
                     manifest_module._hash_regular_file_stably(target, original.st_size)

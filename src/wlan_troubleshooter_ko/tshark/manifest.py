@@ -147,36 +147,55 @@ def _open_regular_readonly(path: Path):
 
 
 def _stable_file_stats(path: Path, handle) -> Tuple[os.stat_result, os.stat_result]:
-    path_stat = os.lstat(path)
+    """경로의 reparse 여부와 두 열린 핸들의 완전한 정체성을 확인한다.
+
+    Windows의 경로 기반 stat fast path는 ``st_dev``, ``st_ino``,
+    ``st_nlink``를 0으로 돌려줄 수 있다. 따라서 lstat 결과는 링크와 파일
+    형식 확인에만 사용하고, hardlink 수와 파일 정체성은 현재 핸들과 같은
+    경로를 재개방한 핸들의 fstat 결과로 확인한다.
+    """
+
+    path_before = os.lstat(path)
     handle_stat = os.fstat(handle.fileno())
+    _reject_linked_components(path)
+    with _open_regular_readonly(path) as reopened_handle:
+        reopened_stat = os.fstat(reopened_handle.fileno())
+    _reject_linked_components(path)
+    path_after = os.lstat(path)
     if (
-        _stat_is_link_or_reparse(path_stat)
+        _stat_is_link_or_reparse(path_before)
+        or _stat_is_link_or_reparse(path_after)
         or _stat_is_link_or_reparse(handle_stat)
-        or not stat.S_ISREG(path_stat.st_mode)
+        or _stat_is_link_or_reparse(reopened_stat)
+        or not stat.S_ISREG(path_before.st_mode)
+        or not stat.S_ISREG(path_after.st_mode)
         or not stat.S_ISREG(handle_stat.st_mode)
-        or path_stat.st_nlink != 1
+        or not stat.S_ISREG(reopened_stat.st_mode)
         or handle_stat.st_nlink != 1
-        or _stat_snapshot(path_stat) != _stat_snapshot(handle_stat)
+        or reopened_stat.st_nlink != 1
+        or _stat_snapshot(handle_stat) != _stat_snapshot(reopened_stat)
     ):
         raise BundleVerificationError(
             "번들 파일은 링크나 외부 hardlink 별칭이 없는 일반 파일이어야 합니다."
         )
-    return path_stat, handle_stat
+    return handle_stat, reopened_stat
 
 
-def _read_regular_file_stably(path: Path, maximum_bytes: int) -> bytes:
+def _read_regular_file_stably(
+    path: Path,
+    maximum_bytes: int,
+) -> Tuple[bytes, Tuple[int, ...]]:
     """동일한 열린 파일 핸들의 전후 상태를 확인하며 제한된 바이트를 읽는다."""
 
     try:
         _reject_linked_components(path)
         with _open_regular_readonly(path) as handle:
-            path_before, handle_before = _stable_file_stats(path, handle)
+            handle_before, _reopened_before = _stable_file_stats(path, handle)
             if handle_before.st_size > maximum_bytes:
                 raise BundleVerificationError("승인 매니페스트가 너무 큽니다.")
             value = handle.read(maximum_bytes + 1)
-            handle_after = os.fstat(handle.fileno())
+            handle_after, _reopened_after = _stable_file_stats(path, handle)
         _reject_linked_components(path)
-        path_after = os.lstat(path)
     except BundleVerificationError:
         raise
     except OSError as exc:
@@ -185,12 +204,10 @@ def _read_regular_file_stably(path: Path, maximum_bytes: int) -> bytes:
         len(value) > maximum_bytes
         or len(value) != handle_before.st_size
         or _stat_is_link_or_reparse(handle_after)
-        or _stat_is_link_or_reparse(path_after)
-        or _stat_snapshot(path_before) != _stat_snapshot(handle_after)
-        or _stat_snapshot(path_before) != _stat_snapshot(path_after)
+        or _stat_snapshot(handle_before) != _stat_snapshot(handle_after)
     ):
         raise BundleVerificationError("번들 파일이 확인 중 변경됐습니다.")
-    return value
+    return value, _stat_snapshot(handle_after)
 
 
 def _hash_regular_file_stably(path: Path, expected_size: int) -> Tuple[str, Tuple[int, ...]]:
@@ -201,7 +218,7 @@ def _hash_regular_file_stably(path: Path, expected_size: int) -> Tuple[str, Tupl
     try:
         _reject_linked_components(path)
         with _open_regular_readonly(path) as handle:
-            path_before, handle_before = _stable_file_stats(path, handle)
+            handle_before, _reopened_before = _stable_file_stats(path, handle)
             if handle_before.st_size != expected_size:
                 raise BundleVerificationError("Portable TShark 파일 크기가 일치하지 않습니다.")
             while True:
@@ -212,9 +229,8 @@ def _hash_regular_file_stably(path: Path, expected_size: int) -> Tuple[str, Tupl
                 if bytes_read > expected_size:
                     raise BundleVerificationError("Portable TShark 파일 크기가 일치하지 않습니다.")
                 digest.update(chunk)
-            handle_after = os.fstat(handle.fileno())
+            handle_after, _reopened_after = _stable_file_stats(path, handle)
         _reject_linked_components(path)
-        path_after = os.lstat(path)
     except BundleVerificationError:
         raise
     except OSError as exc:
@@ -222,12 +238,10 @@ def _hash_regular_file_stably(path: Path, expected_size: int) -> Tuple[str, Tupl
     if (
         bytes_read != expected_size
         or _stat_is_link_or_reparse(handle_after)
-        or _stat_is_link_or_reparse(path_after)
-        or _stat_snapshot(path_before) != _stat_snapshot(handle_after)
-        or _stat_snapshot(path_before) != _stat_snapshot(path_after)
+        or _stat_snapshot(handle_before) != _stat_snapshot(handle_after)
     ):
         raise BundleVerificationError("번들 파일이 해시 확인 중 변경됐습니다.")
-    return digest.hexdigest(), _stat_snapshot(path_after)
+    return digest.hexdigest(), _stat_snapshot(handle_after)
 
 
 def _discover_bundle_files(
@@ -284,9 +298,11 @@ def _discover_bundle_files(
 
 
 def _assert_regular_snapshot(path: Path, expected_snapshot: Tuple[int, ...]) -> None:
-    _reject_linked_components(path)
     try:
-        current = os.lstat(path)
+        _reject_linked_components(path)
+        with _open_regular_readonly(path) as handle:
+            current, _reopened = _stable_file_stats(path, handle)
+        _reject_linked_components(path)
     except OSError as exc:
         raise BundleVerificationError("번들 파일 정체성을 다시 확인할 수 없습니다.") from exc
     if (
@@ -338,7 +354,10 @@ def verify_bundle(vendor_root: Path) -> VerifiedBundle:
     manifest_path = root / "manifest.json"
     try:
         _reject_linked_components(manifest_path)
-        manifest_bytes = _read_regular_file_stably(manifest_path, _MAX_MANIFEST_BYTES)
+        manifest_bytes, _initial_manifest_snapshot = _read_regular_file_stably(
+            manifest_path,
+            _MAX_MANIFEST_BYTES,
+        )
         manifest = json.loads(
             manifest_bytes.decode("utf-8"),
             object_pairs_hook=_reject_duplicate_keys,
@@ -433,8 +452,10 @@ def verify_bundle(vendor_root: Path) -> VerifiedBundle:
         raise BundleVerificationError("매니페스트에 없는 파일이 번들에 포함돼 있습니다.")
 
     try:
-        manifest_after = _read_regular_file_stably(manifest_path, _MAX_MANIFEST_BYTES)
-        manifest_snapshot = _stat_snapshot(os.lstat(manifest_path))
+        manifest_after, manifest_snapshot = _read_regular_file_stably(
+            manifest_path,
+            _MAX_MANIFEST_BYTES,
+        )
     except (OSError, BundleVerificationError) as exc:
         raise BundleVerificationError("Portable TShark 번들이 확인 중 변경됐습니다.") from exc
     if not hmac.compare_digest(manifest_bytes, manifest_after):
@@ -451,8 +472,10 @@ def verify_bundle(vendor_root: Path) -> VerifiedBundle:
         final_file_snapshots.append((resolved, final_snapshot))
 
     try:
-        final_manifest = _read_regular_file_stably(manifest_path, _MAX_MANIFEST_BYTES)
-        manifest_snapshot = _stat_snapshot(os.lstat(manifest_path))
+        final_manifest, manifest_snapshot = _read_regular_file_stably(
+            manifest_path,
+            _MAX_MANIFEST_BYTES,
+        )
         if not hmac.compare_digest(manifest_bytes, final_manifest):
             raise BundleVerificationError("Portable TShark 번들이 확인 중 변경됐습니다.")
         for path, expected_snapshot in final_file_snapshots:

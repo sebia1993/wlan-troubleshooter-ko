@@ -95,6 +95,18 @@ class SourceAuditTests(unittest.TestCase):
         report = self._audit_source(source, "scripts/audit_repository.py")
         self.assertEqual((), report.findings)
 
+    def test_exact_tshark_probe_process_location_passes(self):
+        source = (
+            "import subprocess\n"
+            "def probe_bundle_runtime(command):\n"
+            "    return subprocess.Popen(command, shell=False)\n"
+        )
+        report = self._audit_source(
+            source,
+            "src/wlan_troubleshooter_ko/tshark/runner.py",
+        )
+        self.assertEqual((), report.findings)
+
     def test_network_command_in_argument_sequence_fails(self):
         command = "cu" + "rl"
         source = "import subprocess\nsubprocess.run([" + repr(command) + "], shell=False)\n"
@@ -367,6 +379,46 @@ class SourceAuditTests(unittest.TestCase):
         codes = {finding.code for finding in report.findings}
         self.assertIn("UNAPPROVED_PROCESS_REFERENCE", codes)
         self.assertIn("UNAPPROVED_PROCESS", codes)
+
+    def test_approved_files_reject_reflective_subprocess_access(self):
+        canaries = (
+            (
+                "src/wlan_troubleshooter_ko/tshark/runner.py",
+                "def probe_bundle_runtime(command, member):\n"
+                "    return getattr(subprocess, member)(command, shell=False)\n",
+            ),
+            (
+                "scripts/audit_repository.py",
+                "def _run_git(command):\n"
+                "    return vars(subprocess)['run'](command, shell=False)\n",
+            ),
+            (
+                "src/wlan_troubleshooter_ko/tshark/runner.py",
+                "def probe_bundle_runtime(command):\n"
+                "    namespace = subprocess.__dict__\n"
+                "    return namespace['Popen'](command, shell=False)\n",
+            ),
+        )
+        for relative, body in canaries:
+            with self.subTest(relative=relative, body=body):
+                report = self._audit_source("import subprocess\n" + body, relative)
+                self.assertIn(
+                    "UNAPPROVED_PROCESS_REFERENCE",
+                    {finding.code for finding in report.findings},
+                )
+
+    def test_approved_files_reject_aliased_reflection_builtins(self):
+        source = (
+            "import subprocess\n"
+            "reflect = vars\n"
+            "def _run_git(command):\n"
+            "    return reflect(subprocess)['run'](command, shell=False)\n"
+        )
+        report = self._audit_source(source, "scripts/audit_repository.py")
+        self.assertIn(
+            "UNAPPROVED_PROCESS_REFERENCE",
+            {finding.code for finding in report.findings},
+        )
 
     def test_arbitrary_runtime_dependency_fails(self):
         source = '[project]\ndependencies = ["rich>=13"]\n'
