@@ -6,9 +6,7 @@ on:
       - main
     paths:
       - pyproject.toml
-      - src/wlan_troubleshooter_ko/__init__.py
-      - src/wlan_troubleshooter_ko/app.py
-      - src/wlan_troubleshooter_ko/resources/**
+      - src/wlan_troubleshooter_ko/**
       - tests/portable_build/**
       - RELEASE_NOTES.md
       - THIRD_PARTY_NOTICES.md
@@ -24,10 +22,10 @@ concurrency:
 
 jobs:
   release:
-    name: Validate, build, and publish Win64 Portable
+    name: Validate, build, test, and publish Win64 Portable
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 65
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -71,7 +69,7 @@ jobs:
           if ($ProjectVersion -ne $ModuleVersion) {
               throw "Project and module versions do not match."
           }
-          if ($Tag -ne "v0.3.0-alpha.1" -or $Supply.wireshark.msi.sha256 -eq "DISCOVER") {
+          if ($Tag -ne "v0.4.0-alpha.1" -or $Supply.wireshark.msi.sha256 -eq "DISCOVER") {
               throw "Portable release supply-chain metadata is not pinned."
           }
           "tag=$Tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -84,14 +82,16 @@ jobs:
           python -m pip install --disable-pip-version-check --no-input --no-deps -r tests/portable_build/requirements-build.txt
           python -m pip check
 
-      - name: Build and finalize Portable release assets
+      - name: Build, finalize, and integration-test Portable release assets
         id: package
         shell: pwsh
         run: |
           $Output = Join-Path $env:RUNNER_TEMP "portable-release-output"
+          $PackagePath = Join-Path $Output "package-output.json"
           ./tests/portable_build/build_portable.ps1 -Mode Build -PythonPath python -OutputDirectory $Output
-          ./tests/portable_build/finalize_portable.ps1 -PackageOutputPath (Join-Path $Output "package-output.json") -PythonPath python
-          $Package = Get-Content -LiteralPath (Join-Path $Output "package-output.json") -Raw | ConvertFrom-Json
+          ./tests/portable_build/finalize_portable.ps1 -PackageOutputPath $PackagePath -PythonPath python
+          ./tests/portable_build/verify_protocol_inventory.ps1 -PackageOutputPath $PackagePath -PythonPath python
+          $Package = Get-Content -LiteralPath $PackagePath -Raw | ConvertFrom-Json
           foreach ($Name in @("archive", "archive_checksum", "wireshark_source", "wireshark_source_checksum", "observed_supply_chain")) {
               $Value = [string]$Package.$Name
               if (-not (Test-Path -LiteralPath $Value -PathType Leaf)) {
@@ -101,7 +101,7 @@ jobs:
           }
           "archive_sha256=$($Package.archive_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "archive_size_bytes=$($Package.archive_size_bytes)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Get-Content -LiteralPath (Join-Path $Output "package-output.json")
+          Get-Content -LiteralPath $PackagePath
 
       - name: Create or refresh GitHub prerelease
         shell: pwsh
@@ -149,3 +149,4 @@ jobs:
           "- Tag: ${{ steps.metadata.outputs.tag }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "- ZIP bytes: ${{ steps.package.outputs.archive_size_bytes }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           ("- ZIP SHA-256: " + '${{ steps.package.outputs.archive_sha256 }}') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Portable ARP/DNS protocol inventory integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

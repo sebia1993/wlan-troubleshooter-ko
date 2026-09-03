@@ -23,6 +23,15 @@ function Restore-EnvironmentValue {
     }
 }
 
+$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$ProjectText = Get-Content -LiteralPath (Join-Path $RepositoryRoot "pyproject.toml") -Raw
+$ReleaseTag = [regex]::Match($ProjectText, '(?m)^release-tag\s*=\s*"([^"]+)"').Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
+    throw "Release tag is missing."
+}
+$ExpectedProductVersion = $ReleaseTag.Substring(1)
+$ExpectedArchiveName = "WlanTroubleshooterKO-$ReleaseTag-win64-portable.zip"
+
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
 if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) {
     throw "Portable package metadata is missing."
@@ -32,6 +41,9 @@ $Archive = [System.IO.Path]::GetFullPath([string]$Package.archive)
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
     throw "Portable archive is missing."
 }
+if ((Split-Path -Leaf $Archive) -ne $ExpectedArchiveName) {
+    throw "Portable archive name does not match release metadata."
+}
 
 $WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-inventory-test-" + [guid]::NewGuid().ToString("N"))
 $Expanded = Join-Path $WorkRoot "portable"
@@ -40,6 +52,11 @@ $Output = Join-Path $WorkRoot "analysis-result.json"
 New-Item -ItemType Directory -Path $Expanded -Force | Out-Null
 try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
+    $BuildInfo = Get-Content -LiteralPath (Join-Path $Expanded "BUILD_INFO.json") -Raw | ConvertFrom-Json -Depth 32
+    if ($BuildInfo.product_version -ne $ExpectedProductVersion -or $BuildInfo.protocol_inventory_runtime -ne "enabled") {
+        throw "Portable BUILD_INFO does not describe the enabled protocol inventory runtime."
+    }
+
     & $PythonPath (Join-Path $PSScriptRoot "generate_inventory_fixture.py") --output $Capture
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Capture -PathType Leaf)) {
         throw "Synthetic Portable integration capture generation failed."

@@ -18,9 +18,9 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_project_module_and_release_versions_match(self):
         self.assertEqual(self.value("version"), wlan_troubleshooter_ko.__version__)
-        self.assertEqual(self.value("version"), "0.3.0a1")
-        self.assertEqual(self.value("release-tag"), "v0.3.0-alpha.1")
-        self.assertEqual(self.value("phase"), "3")
+        self.assertEqual(self.value("version"), "0.4.0a1")
+        self.assertEqual(self.value("release-tag"), "v0.4.0-alpha.1")
+        self.assertEqual(self.value("phase"), "4A")
 
     def test_portable_component_versions_are_pinned(self):
         self.assertEqual(self.value("portable-python"), "3.13")

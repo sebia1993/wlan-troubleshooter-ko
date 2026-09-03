@@ -57,7 +57,7 @@ class PortableSupplyChainTests(unittest.TestCase):
         self.assertIn("pyinstaller==" + self.value["pyinstaller_version"], [line.casefold() for line in lines])
 
     def test_build_scripts_accept_no_url_or_version_parameters(self):
-        for filename in ("build_portable.ps1", "finalize_portable.ps1"):
+        for filename in ("build_portable.ps1", "finalize_portable.ps1", "verify_protocol_inventory.ps1"):
             text = (self.support / filename).read_text(encoding="utf-8")
             parameter_block = text.split(")", 1)[0]
             for forbidden in ("Url", "Uri", "Version", "Hash", "Installer"):
@@ -68,7 +68,7 @@ class PortableSupplyChainTests(unittest.TestCase):
         self.assertIn("--windowed", build_text)
         self.assertIn("--onedir", build_text)
 
-    def test_finalize_requires_licenses_and_exact_executables(self):
+    def test_finalize_requires_licenses_exact_executables_and_release_metadata(self):
         text = (self.support / "finalize_portable.ps1").read_text(encoding="utf-8")
         for value in (
             "PYTHON-LICENSE.txt",
@@ -76,10 +76,25 @@ class PortableSupplyChainTests(unittest.TestCase):
             "TK-LICENSE.txt",
             "PYINSTALLER-COPYING.txt",
             "vendor/wireshark/COPYING",
+            "vendor/wireshark/tshark.exe",
+            "WlanTroubleshooterKO.exe",
+            "release-tag",
+            "protocol_inventory_runtime",
         ):
             self.assertIn(value, text)
-        self.assertIn("vendor/wireshark/tshark.exe", text)
-        self.assertIn("WlanTroubleshooterKO.exe", text)
+
+    def test_portable_workflows_run_real_inventory_gate(self):
+        for relative in (
+            ".github/workflows/windows-portable.yml",
+            ".github/workflows/preview-release.yml",
+        ):
+            text = (self.root / relative).read_text(encoding="utf-8")
+            self.assertIn("verify_protocol_inventory.ps1", text)
+        verifier = (self.support / "verify_protocol_inventory.ps1").read_text(encoding="utf-8")
+        self.assertIn("--analyze-capture", verifier)
+        self.assertIn("frames_observed", verifier)
+        self.assertIn('"arp"', verifier)
+        self.assertIn('"dns"', verifier)
 
 
 if __name__ == "__main__":
