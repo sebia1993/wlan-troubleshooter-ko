@@ -1,4 +1,4 @@
-"""로컬 캡처 사전 점검과 Phase 2B 준비 상태 화면."""
+"""로컬 캡처 사전 점검과 Portable 런타임 상태 화면."""
 
 from __future__ import annotations
 
@@ -41,21 +41,21 @@ def _compact(items: Tuple[str, ...], limit: int = 3) -> str:
     return " · ".join(visible)
 
 
-def _phase2b_status(bundle_status: BundleStatus) -> str:
+def _portable_status(bundle_status: BundleStatus) -> str:
     resources = Path(__file__).resolve().parents[1] / "resources"
     try:
         registry = load_field_profiles(resources / "tshark" / "field-profiles.v1.json")
         profile = registry.get_profile("protocol-inventory")
     except FieldProfileError:
-        return "Phase 2B 프로파일 오류 · 프로토콜 인벤토리를 준비할 수 없습니다."
-    base = "Phase 2B 프로파일 {0} · 승인 필드 {1}개 · 프로토콜 그룹 {2}개".format(
+        return "프로토콜 인벤토리 프로파일 오류 · 배포본을 다시 받아야 합니다."
+    base = "필드 프로파일 {0} · 승인 필드 {1}개 · 프로토콜 그룹 {2}개".format(
         registry.profile_version,
         len(profile.fields),
         len(registry.protocol_groups),
     )
     if bundle_status.code == "integrity_verified":
-        return base + " · TShark 필드 호환성 실행 검증 필요"
-    return base + " · 실행 비활성 · 승인 Portable TShark 대기"
+        return base + " · 내장 TShark 무결성 확인됨 · Python/Wireshark 별도 설치 불필요"
+    return base + " · 소스 실행 모드 · 최종 사용자는 Win64 Portable ZIP을 사용해 주세요."
 
 
 def format_preflight_detail(
@@ -75,8 +75,8 @@ def format_preflight_detail(
         "형식상 확인 가능: {available}\n"
         "현재 확인 불가: {unavailable}\n"
         "주의: {cautions}\n"
-        "Phase 2B는 프로토콜 존재 인벤토리의 고정 필드·파서·정규화 기반까지 준비됐습니다. "
-        "승인 TShark가 제공되기 전에는 실제 인벤토리를 실행하지 않습니다."
+        "현재 화면은 캡처 구조와 분석 가능 범위를 점검합니다. "
+        "내장 TShark를 이용한 실제 프로토콜 존재 인벤토리와 장애 판정 화면은 후속 단계에서 연결됩니다."
     ).format(
         format_name=capture.capture_format.upper(),
         size=capture.size_bytes,
@@ -154,7 +154,7 @@ class MainWindow:
         self._vendor_root = Path(__file__).resolve().parents[3] / "vendor" / "wireshark"
         bundle_status = inspect_bundle(self._vendor_root)
         self._tshark_status = tk.StringVar(value=bundle_status.message)
-        self._phase2b_status = tk.StringVar(value=_phase2b_status(bundle_status))
+        self._portable_status = tk.StringVar(value=_portable_status(bundle_status))
         self._selection_generation = 0
         self._validation_cancel = threading.Event()
         self._closed = False
@@ -163,7 +163,7 @@ class MainWindow:
 
     def _build(self) -> None:
         self._root.title("WLAN 장애 분석기 KO")
-        self._root.minsize(780, 570)
+        self._root.minsize(800, 580)
 
         frame = ttk.Frame(self._root, padding=24)
         frame.pack(fill="both", expand=True)
@@ -176,7 +176,7 @@ class MainWindow:
         ).pack(anchor="w", pady=(12, 4))
         ttk.Label(
             frame,
-            text="초급 네트워크 엔지니어를 위한 Phase 2B 기반 프리뷰",
+            text="Python·Wireshark 설치 없이 실행하는 Win64 Portable 프리뷰",
         ).pack(anchor="w")
 
         ttk.Separator(frame).pack(fill="x", pady=20)
@@ -193,7 +193,7 @@ class MainWindow:
         ttk.Label(
             frame,
             textvariable=self._detail,
-            wraplength=720,
+            wraplength=740,
             justify="left",
         ).pack(anchor="w")
 
@@ -205,13 +205,13 @@ class MainWindow:
         ttk.Label(frame, textvariable=self._tshark_status).pack(anchor="w", pady=(6, 0))
         ttk.Label(
             frame,
-            textvariable=self._phase2b_status,
-            wraplength=720,
+            textvariable=self._portable_status,
+            wraplength=740,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Label(
             frame,
-            text="프로토콜 존재는 접속 성공이나 장애 원인을 뜻하지 않으며 실제 장애 판정은 아직 지원하지 않습니다.",
-            wraplength=720,
+            text="현재 버전은 캡처 사전 점검 프리뷰이며 실제 무선 장애 원인 판정은 아직 지원하지 않습니다.",
+            wraplength=740,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Button(frame, text="종료", command=self._close).pack(anchor="e", pady=(18, 0))
 

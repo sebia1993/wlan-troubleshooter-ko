@@ -15,6 +15,19 @@ def package_root() -> Path:
     return Path(__file__).resolve().parent
 
 
+def distribution_root() -> Path:
+    """소스 실행에서는 저장소, PyInstaller onedir에서는 EXE 폴더를 반환한다."""
+
+    return package_root().parents[1]
+
+
+def _external_python_required() -> bool:
+    """PyInstaller 배포 루트에 제품 EXE가 있는지 보수적으로 확인한다."""
+
+    executable = distribution_root() / "WlanTroubleshooterKO.exe"
+    return not executable.is_file()
+
+
 def self_check() -> Dict[str, str]:
     resources = package_root() / "resources"
     rules = load_ruleset(resources / "rules" / "v1" / "rules.json")
@@ -24,16 +37,18 @@ def self_check() -> Dict[str, str]:
     inventory_profile = field_registry.get_profile("protocol-inventory")
     tkinter.Tcl()
 
-    vendor_root = package_root().parents[1] / "vendor" / "wireshark"
+    vendor_root = distribution_root() / "vendor" / "wireshark"
     vendor_manifest = vendor_root / "manifest.json"
-    tshark_status = "승인 번들 미제공(예상 상태)"
-    inventory_execution = "비활성 · 승인 Portable TShark 대기"
+    tshark_status = "프로젝트 고정 TShark 미포함"
+    tshark_external_required = "true"
+    inventory_execution = "비활성 · 프로젝트 고정 Portable TShark 대기"
     if vendor_manifest.exists():
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
+        tshark_external_required = "false"
         inventory_execution = "호출 준비 가능 · 실제 필드 호환성 실행 검증 필요"
     return {
-        "phase": "2B",
+        "phase": "3",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "message_locale": messages["locale"],
@@ -42,11 +57,28 @@ def self_check() -> Dict[str, str]:
         "inventory_field_count": str(len(inventory_profile.fields)),
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
+        "python_external_required": "true" if _external_python_required() else "false",
+        "tshark_external_required": tshark_external_required,
         "portable_tshark": tshark_status,
         "protocol_inventory_execution": inventory_execution,
         "analysis_features": "Phase 2A 구조 점검 + Phase 2B 필드·TSV·프로토콜 인벤토리 정규화",
         "network_features": "없음",
     }
+
+
+def _write_self_check_output(raw_path: str, value: Dict[str, str]) -> None:
+    if (
+        not raw_path
+        or "\x00" in raw_path
+        or "://" in raw_path
+        or raw_path.startswith(("\\\\", "//"))
+    ):
+        raise ValueError("자체 점검 출력은 로컬 절대경로여야 합니다.")
+    path = Path(raw_path)
+    if not path.is_absolute() or not path.parent.is_dir() or path.is_symlink():
+        raise ValueError("자체 점검 출력 경로를 사용할 수 없습니다.")
+    with path.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(dumps(value))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,15 +88,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--self-test",
         dest="self_check",
         action="store_true",
-        help="창을 열지 않고 Phase 2B 리소스와 Tkinter를 검사합니다.",
+        help="창을 열지 않고 리소스와 Tkinter를 검사합니다.",
+    )
+    parser.add_argument(
+        "--self-check-output",
+        help="창과 콘솔 없이 자체 점검 JSON을 새 로컬 파일에 기록합니다.",
     )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = build_parser().parse_args(argv)
-    if arguments.self_check:
-        print(dumps(self_check()), end="")
+    if arguments.self_check or arguments.self_check_output:
+        result = self_check()
+        if arguments.self_check_output:
+            _write_self_check_output(arguments.self_check_output, result)
+        else:
+            print(dumps(result), end="")
         return 0
 
     from wlan_troubleshooter_ko.ui.main_window import launch

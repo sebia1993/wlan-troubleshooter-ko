@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "python_version": "3.13",
+  "pyinstaller_version": "6.22.2",
+  "wireshark": {
+    "version": "4.6.8",
+    "msi": {
+      "filename": "Wireshark-4.6.8-x64.msi",
+      "url": "https://www.wireshark.org/download/win64/all-versions/Wireshark-4.6.8-x64.msi",
+      "sha256": "779ee66f846376942a3b631a78bba8c3d509697d07743349e1893056211d05e3",
+      "signer_subject_contains": "Wireshark Foundation"
+    },
+    "source": {
+      "filename": "wireshark-4.6.8.tar.xz",
+      "url": "https://www.wireshark.org/download/src/all-versions/wireshark-4.6.8.tar.xz",
+      "sha256": "c0f1ccf217bc0d3b51a9c03ea178b0f7df682e475da26a2d21cd4a1bdd9579d0"
+    }
+  }
+}

@@ -1,0 +1,67 @@
+name: Windows Portable Build
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wlan-troubleshooter-ko-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Build and verify Win64 portable package
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      PYTHONHASHSEED: "0"
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      PYTHONPATH: src
+
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.13 x64
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+          architecture: x64
+
+      - name: Run runtime-offline validation
+        shell: pwsh
+        run: ./scripts/verify_offline.ps1 -PythonPath python
+
+      - name: Read pinned build toolchain
+        id: supply
+        shell: pwsh
+        run: |
+          $Value = Get-Content -LiteralPath tests/portable_build/supply-chain.json -Raw | ConvertFrom-Json
+          if ($Value.wireshark.msi.sha256 -eq "DISCOVER" -or $Value.wireshark.source.sha256 -eq "DISCOVER") {
+              throw "Wireshark supply-chain hashes must be pinned before Portable build."
+          }
+          "pyinstaller=$($Value.pyinstaller_version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install exact build-only Python packages
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --no-input --no-deps -r tests/portable_build/requirements-build.txt
+          python -m pip check
+          if ((python -m PyInstaller --version).Trim() -ne '${{ steps.supply.outputs.pyinstaller }}') {
+              throw "PyInstaller version does not match the pinned supply-chain value."
+          }
+
+      - name: Build, finalize, and verify Python-free Portable package
+        shell: pwsh
+        run: |
+          $Output = Join-Path $env:RUNNER_TEMP "portable-output"
+          ./tests/portable_build/build_portable.ps1 -Mode Build -PythonPath python -OutputDirectory $Output
+          ./tests/portable_build/finalize_portable.ps1 -PackageOutputPath (Join-Path $Output "package-output.json") -PythonPath python
+          Get-Content -LiteralPath (Join-Path $Output "package-output.json")
