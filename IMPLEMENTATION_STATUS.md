@@ -6,11 +6,11 @@
 
 | 구분 | 상태 | 근거 |
 |---|---|---|
-| Phase 0 저장소·보안 기반 | 구현 완료·Windows 검증 대기 | 문서, ADR, 커밋 차단, 감사 도구 |
-| Phase 1 최소 앱·안전 경계 | 구현 완료·Windows 검증 대기 | Tkinter, 입력 검증, 임시공간, 마스킹, TShark 정책, HTML 검사 |
+| Phase 0 저장소·보안 기반 | 구현 완료·자동 검증 통과 | 문서, ADR, 커밋 차단, 감사 도구 |
+| Phase 1 최소 앱·안전 경계 | 구현 완료·자동 검증 통과 | Tkinter, 입력 검증, 임시공간, 마스킹, TShark 정책, HTML 검사 |
 | 로컬 macOS 보조 검증 | 통과 | macOS Python 3.9.6에서 컴파일, 단위 테스트 146개, 소스 감사 27개 파일, 자체 점검 통과 |
 | staged 저장소 감사 | 통과 | 의도한 50개 파일의 Git index blob을 감사해 실제 캡처·민감 산출물·바이너리 없음 확인 |
-| Windows GitHub Actions | 대기 | 최초 푸시 후 `windows-latest` 결과 기록 예정 |
+| Windows GitHub Actions | 통과 | `windows-latest`·Python 3.13 x64에서 컴파일, 단위 테스트 146개, 소스·저장소 감사, 자체 점검 통과 |
 | 승인된 Portable TShark | 미제공 | 실행 파일·해시·내부 승인 자료 없음 |
 | 실제 PCAP 분석 | 미착수 | Phase 2 범위 |
 
@@ -24,4 +24,4 @@
 
 실제 사내 데이터와 캡처는 이 공개 저장소에 추가하지 않습니다.
 
-macOS 결과는 Python 3.13 또는 Windows 검증을 대신하지 않습니다. 목표 런타임 검증의 기준은 최신 `main` 커밋에 대한 `Windows CI` 성공 결과입니다.
+macOS 결과는 Python 3.13 또는 Windows 검증을 대신하지 않습니다. 목표 런타임 검증의 기준은 최신 PR 헤드와 병합 후 최신 `main`에 대한 `Windows CI` 성공 결과입니다.
