@@ -1,0 +1,167 @@
+"""캡처 사전 점검과 실제 프로토콜 인벤토리를 한 흐름으로 조정한다."""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Optional, Union
+
+from wlan_troubleshooter_ko.analysis.models import (
+    CaptureCapabilityReport,
+    CaptureStructure,
+    CaptureStructureError,
+)
+from wlan_troubleshooter_ko.analysis.preflight import (
+    classify_capture_capabilities,
+    inspect_capture_structure,
+)
+from wlan_troubleshooter_ko.analysis.protocol_inventory import ProtocolInventoryError
+from wlan_troubleshooter_ko.core.capture import (
+    CaptureInfo,
+    CaptureValidationError,
+    validate_capture,
+)
+from wlan_troubleshooter_ko.core.workspace import AnalysisWorkspace, WorkspaceError
+from wlan_troubleshooter_ko.tshark.catalog import FieldCatalogError
+from wlan_troubleshooter_ko.tshark.inventory import (
+    ProtocolInventoryRun,
+    run_protocol_inventory,
+)
+from wlan_troubleshooter_ko.tshark.manifest import BundleVerificationError
+from wlan_troubleshooter_ko.tshark.profiles import (
+    FieldCompatibilityError,
+    FieldProfileError,
+)
+from wlan_troubleshooter_ko.tshark.runner import TSharkExecutionError
+from wlan_troubleshooter_ko.tshark.status import inspect_bundle
+
+
+PathLike = Union[str, Path]
+
+
+class CaptureAnalysisError(ValueError):
+    """사전 점검조차 안전하게 완료할 수 없는 경우."""
+
+
+@dataclass(frozen=True)
+class CaptureAnalysisResult:
+    """경로와 패킷 원문을 포함하지 않는 전체 분석 결과."""
+
+    capture_format: str
+    size_bytes: int
+    sha256_prefix: str
+    structure: CaptureStructure
+    capabilities: CaptureCapabilityReport
+    inventory_state: str
+    inventory_message: str
+    protocol_inventory: Optional[ProtocolInventoryRun]
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": 1,
+            "capture": {
+                "format": self.capture_format,
+                "size_bytes": self.size_bytes,
+                "sha256_prefix": self.sha256_prefix,
+            },
+            "structure": self.structure.to_dict(),
+            "capabilities": self.capabilities.to_dict(),
+            "protocol_inventory_state": self.inventory_state,
+            "protocol_inventory_message": self.inventory_message,
+            "protocol_inventory": (
+                None
+                if self.protocol_inventory is None
+                else self.protocol_inventory.to_dict()
+            ),
+        }
+
+
+def _safe_inventory_failure(exc: Exception) -> str:
+    if isinstance(exc, (FieldCompatibilityError, TSharkExecutionError)):
+        return str(exc)
+    if isinstance(
+        exc,
+        (FieldCatalogError, FieldProfileError, ProtocolInventoryError, WorkspaceError),
+    ):
+        return str(exc)
+    if isinstance(exc, BundleVerificationError):
+        return (
+            "내장 TShark 파일이 누락되었거나 변경되었습니다. "
+            "배포 ZIP을 다시 압축 해제해 주세요."
+        )
+    return "프로토콜 존재 인벤토리를 안전하게 완료하지 못했습니다."
+
+
+def analyze_capture(
+    capture_path: PathLike,
+    vendor_root: Path,
+    profile_path: Path,
+    *,
+    workspace_base: Optional[PathLike] = None,
+    timeout_seconds: int = 180,
+    cancel_event: Optional[threading.Event] = None,
+) -> CaptureAnalysisResult:
+    """사전 점검 후 내장 TShark가 유효하면 프로토콜 인벤토리를 실행한다."""
+
+    try:
+        capture: CaptureInfo = validate_capture(capture_path, cancel_event=cancel_event)
+        structure = inspect_capture_structure(capture, cancel_event=cancel_event)
+        capabilities = classify_capture_capabilities(structure)
+    except (CaptureValidationError, CaptureStructureError) as exc:
+        raise CaptureAnalysisError(str(exc)) from exc
+    except Exception:
+        raise CaptureAnalysisError(
+            "캡처 파일을 안전하게 사전 점검하지 못했습니다."
+        ) from None
+
+    bundle_status = inspect_bundle(vendor_root)
+    if bundle_status.code != "integrity_verified":
+        return CaptureAnalysisResult(
+            capture_format=capture.capture_format,
+            size_bytes=capture.size_bytes,
+            sha256_prefix=capture.sha256[:12],
+            structure=structure,
+            capabilities=capabilities,
+            inventory_state="unavailable",
+            inventory_message=(
+                "내장 TShark가 준비되지 않아 프로토콜 존재 인벤토리를 "
+                "실행하지 않았습니다."
+            ),
+            protocol_inventory=None,
+        )
+
+    expected_frames = structure.packets_scanned if structure.scan_complete else None
+    try:
+        with AnalysisWorkspace(base_directory=workspace_base) as workspace:
+            inventory_run = run_protocol_inventory(
+                vendor_root,
+                capture.path,
+                workspace.root,
+                profile_path,
+                expected_frames=expected_frames,
+                timeout_seconds=timeout_seconds,
+                cancel_event=cancel_event,
+            )
+    except Exception as exc:
+        return CaptureAnalysisResult(
+            capture_format=capture.capture_format,
+            size_bytes=capture.size_bytes,
+            sha256_prefix=capture.sha256[:12],
+            structure=structure,
+            capabilities=capabilities,
+            inventory_state="failed",
+            inventory_message=_safe_inventory_failure(exc),
+            protocol_inventory=None,
+        )
+
+    return CaptureAnalysisResult(
+        capture_format=capture.capture_format,
+        size_bytes=capture.size_bytes,
+        sha256_prefix=capture.sha256[:12],
+        structure=structure,
+        capabilities=capabilities,
+        inventory_state="completed",
+        inventory_message="내장 TShark로 프로토콜 존재 인벤토리를 완료했습니다.",
+        protocol_inventory=inventory_run,
+    )
