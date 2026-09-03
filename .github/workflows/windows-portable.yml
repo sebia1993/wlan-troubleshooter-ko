@@ -1,0 +1,70 @@
+name: Windows Portable Build
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wlan-troubleshooter-ko-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Discover or build Win64 portable package
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONHASHSEED: "0"
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      PYTHONPATH: src
+
+    steps:
+      - name: Check out source without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.13 x64
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+          architecture: x64
+
+      - name: Run runtime-offline validation
+        shell: pwsh
+        run: ./scripts/verify_offline.ps1 -PythonPath python
+
+      - name: Read supply-chain state
+        id: supply
+        shell: pwsh
+        run: |
+          $Value = Get-Content -LiteralPath tests/portable_build/supply-chain.json -Raw | ConvertFrom-Json
+          $Discover = $Value.wireshark.msi.sha256 -eq "DISCOVER" -or $Value.wireshark.source.sha256 -eq "DISCOVER"
+          "discover=$($Discover.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "pyinstaller=$($Value.pyinstaller_version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Discover official Wireshark hashes and signer
+        if: steps.supply.outputs.discover == 'true'
+        shell: pwsh
+        run: |
+          $Output = Join-Path $env:RUNNER_TEMP "portable-discovery"
+          ./tests/portable_build/build_portable.ps1 -Mode Discover -PythonPath python -OutputDirectory $Output
+          Get-Content -LiteralPath (Join-Path $Output "supply-chain-observed.json")
+
+      - name: Install pinned build-only PyInstaller
+        if: steps.supply.outputs.discover != 'true'
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check --no-input "pyinstaller==${{ steps.supply.outputs.pyinstaller }}"
+
+      - name: Build and verify Python-free Win64 portable package
+        if: steps.supply.outputs.discover != 'true'
+        shell: pwsh
+        run: |
+          $Output = Join-Path $env:RUNNER_TEMP "portable-output"
+          ./tests/portable_build/build_portable.ps1 -Mode Build -PythonPath python -OutputDirectory $Output
+          Get-Content -LiteralPath (Join-Path $Output "package-output.json")
