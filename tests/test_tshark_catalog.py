@@ -1,0 +1,115 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from wlan_troubleshooter_ko.tshark.catalog import FieldCatalogError, parse_field_catalog
+from wlan_troubleshooter_ko.tshark.fields_output import FieldsOutputError, iter_fields_rows
+from wlan_troubleshooter_ko.tshark.profiles import (
+    FieldCompatibilityError,
+    FieldProfileError,
+    load_field_profiles,
+    resolve_profile,
+)
+
+
+CATALOG_LINES = [
+    "P\tFrame\tframe\n",
+    "F\tFrame Number\tframe.number\tFT_UINT32\tframe\tBASE_DEC\t0x0\t\n",
+    "F\tInterface id\tframe.interface_id\tFT_UINT32\tframe\tBASE_DEC\t0x0\t\n",
+    "F\tCapture Length\tframe.cap_len\tFT_UINT32\tframe\tBASE_DEC\t0x0\t\n",
+    "F\tFrame Length\tframe.len\tFT_UINT32\tframe\tBASE_DEC\t0x0\t\n",
+    "F\tProtocols in frame\tframe.protocols\tFT_STRING\tframe\t\t0x0\t\n",
+]
+
+
+class TSharkCatalogTests(unittest.TestCase):
+    def registry_path(self):
+        return (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "wlan_troubleshooter_ko"
+            / "resources"
+            / "tshark"
+            / "field-profiles.v1.json"
+        )
+
+    def test_catalog_and_profile_resolve_deterministically(self):
+        catalog = parse_field_catalog(CATALOG_LINES)
+        registry = load_field_profiles(self.registry_path())
+        resolved = resolve_profile(registry, catalog, "protocol-inventory")
+        self.assertEqual(resolved.profile_version, "0.2.0")
+        self.assertEqual(resolved.headers()[0], "frame.number")
+        self.assertEqual(resolved.output_keys()[-1], "protocols")
+        self.assertEqual(resolved.missing_optional_fields, ())
+        self.assertTrue(catalog.has_field("frame.protocols"))
+
+    def test_missing_optional_field_is_recorded(self):
+        catalog = parse_field_catalog(
+            [line for line in CATALOG_LINES if "frame.interface_id" not in line]
+        )
+        resolved = resolve_profile(
+            load_field_profiles(self.registry_path()),
+            catalog,
+            "protocol-inventory",
+        )
+        self.assertEqual(resolved.missing_optional_fields, ("interface_id",))
+        self.assertNotIn("frame.interface_id", resolved.headers())
+
+    def test_missing_required_field_fails_closed(self):
+        catalog = parse_field_catalog(
+            [line for line in CATALOG_LINES if "frame.protocols" not in line]
+        )
+        with self.assertRaises(FieldCompatibilityError):
+            resolve_profile(
+                load_field_profiles(self.registry_path()),
+                catalog,
+                "protocol-inventory",
+            )
+
+    def test_catalog_rejects_conflicting_duplicate_and_unknown_record(self):
+        with self.assertRaises(FieldCatalogError):
+            parse_field_catalog(
+                CATALOG_LINES
+                + ["F\tDifferent\tframe.number\tFT_STRING\tframe\t\t0x0\t\n"]
+            )
+        with self.assertRaises(FieldCatalogError):
+            parse_field_catalog(CATALOG_LINES + ["X\tunknown\n"])
+
+    def test_catalog_rejects_limits_and_nul(self):
+        with self.assertRaises(FieldCatalogError):
+            parse_field_catalog(CATALOG_LINES, max_records=2)
+        with self.assertRaises(FieldCatalogError):
+            parse_field_catalog(CATALOG_LINES + ["F\tBad\tbad.field\x00\tFT_STRING\tbad\t\t0x0\t\n"])
+
+    def test_profile_loader_rejects_unknown_key_and_duplicate_json_key(self):
+        original = json.loads(self.registry_path().read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            unknown = Path(directory) / "unknown.json"
+            changed = dict(original)
+            changed["unexpected"] = True
+            unknown.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaises(FieldProfileError):
+                load_field_profiles(unknown)
+
+            duplicate = Path(directory) / "duplicate.json"
+            duplicate.write_text(
+                '{"schema_version":1,"schema_version":1,"profile_version":"0.2.0","profiles":[],"protocol_groups":[]}',
+                encoding="utf-8",
+            )
+            with self.assertRaises(FieldProfileError):
+                load_field_profiles(duplicate)
+
+    def test_fields_output_parses_quoted_tsv_and_rejects_wrong_header(self):
+        catalog = parse_field_catalog(CATALOG_LINES)
+        registry = load_field_profiles(self.registry_path())
+        profile = resolve_profile(registry, catalog, "protocol-inventory")
+        header = "\t".join('"{0}"'.format(item) for item in profile.headers())
+        row = '"1"\t"0"\t"100"\t"100"\t"eth:ip:udp:dns"'
+        self.assertEqual(len(list(iter_fields_rows(header + "\n" + row + "\n", profile))), 1)
+        with self.assertRaises(FieldsOutputError):
+            list(iter_fields_rows('"frame.protocols"\n"dns"\n', profile))
+
+
+if __name__ == "__main__":
+    unittest.main()
