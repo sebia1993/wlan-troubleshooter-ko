@@ -1,38 +1,21 @@
-"""격리된 Portable TShark 준비 확인과 제한된 Phase 2B 실행 경계."""
+"""Phase 2 실행 없이 격리된 TShark 호출 경계만 준비한다."""
 
 from __future__ import annotations
 
 import os
-import queue
 import stat
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Tuple
+from typing import Iterable, Mapping, Optional, Tuple
 
-from wlan_troubleshooter_ko.analysis.protocol_inventory import (
-    ProtocolInventory,
-    build_protocol_inventory,
-)
-from wlan_troubleshooter_ko.core.capture import CaptureInfo, validate_capture
-from wlan_troubleshooter_ko.tshark.catalog import FieldCatalog, parse_field_catalog
 from wlan_troubleshooter_ko.tshark.manifest import (
-    VerifiedBundle,
     revalidate_bundle_snapshot,
     verify_bundle,
 )
-from wlan_troubleshooter_ko.tshark.policy import (
-    build_analysis_argv,
-    build_field_catalog_argv,
-    build_profile_argv,
-)
-from wlan_troubleshooter_ko.tshark.profiles import (
-    ResolvedProfile,
-    load_field_profiles,
-    resolve_profile,
-)
+from wlan_troubleshooter_ko.tshark.policy import build_analysis_argv
 
 
 _PASSTHROUGH_ENVIRONMENT = (
@@ -42,11 +25,10 @@ _PASSTHROUGH_ENVIRONMENT = (
     "PATHEXT",
 )
 _REPARSE_POINT_FLAG = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-_STREAM_CHUNK_BYTES = 64 * 1024
 
 
 class TSharkExecutionError(RuntimeError):
-    """TShark 실행 준비 또는 제한된 실행 경계가 안전하지 않은 경우."""
+    """TShark 실행 준비 경계가 안전하지 않은 경우."""
 
 
 @dataclass(frozen=True)
@@ -55,33 +37,6 @@ class PreparedTSharkInvocation:
 
     arguments: Tuple[str, ...]
     environment: Mapping[str, str]
-
-
-@dataclass(frozen=True)
-class FieldCatalogRun:
-    bundle_version: str
-    manifest_sha256: str
-    catalog: FieldCatalog
-
-
-@dataclass(frozen=True)
-class ProtocolInventoryRun:
-    bundle_version: str
-    manifest_sha256: str
-    resolved_profile: ResolvedProfile
-    catalog_records: int
-    inventory: ProtocolInventory
-
-    def to_dict(self) -> Dict[str, object]:
-        return {
-            "bundle_version": self.bundle_version,
-            "manifest_sha256": self.manifest_sha256,
-            "profile_id": self.resolved_profile.profile_id,
-            "profile_version": self.resolved_profile.profile_version,
-            "resolved_fields": list(self.resolved_profile.headers()),
-            "catalog_records": self.catalog_records,
-            "inventory": self.inventory.to_dict(),
-        }
 
 
 @dataclass(frozen=True)
@@ -154,11 +109,6 @@ def _stat_snapshot(file_stat: os.stat_result) -> Tuple[int, ...]:
         getattr(file_stat, "st_ctime_ns", int(file_stat.st_ctime * 1_000_000_000)),
         getattr(file_stat, "st_file_attributes", 0) or 0,
     )
-
-
-def _same_directory_identity(current: os.stat_result, expected: Tuple[int, ...]) -> bool:
-    snapshot = _stat_snapshot(current)
-    return all(snapshot[index] == expected[index] for index in (0, 1, 2, 3, 7))
 
 
 def _prepare_isolated_environment(
@@ -258,7 +208,10 @@ def _validate_prepared_isolation(prepared: _PreparedIsolation) -> None:
             for entry in entries:
                 entry_path = Path(entry.path)
                 entry_stat = entry.stat(follow_symlinks=False)
-                if _stat_is_link_or_reparse(entry_stat) or not stat.S_ISDIR(entry_stat.st_mode):
+                if (
+                    _stat_is_link_or_reparse(entry_stat)
+                    or not stat.S_ISDIR(entry_stat.st_mode)
+                ):
                     raise TSharkExecutionError("격리 작업공간에 임의 파일이 있습니다.")
                 discovered.add(entry_path)
         if discovered != expected_directories:
@@ -289,46 +242,6 @@ def _validate_prepared_isolation(prepared: _PreparedIsolation) -> None:
         raise
     except (OSError, ValueError):
         raise TSharkExecutionError("격리 작업공간을 다시 확인할 수 없습니다.") from None
-
-
-def _validate_post_execution_isolation(prepared: _PreparedIsolation) -> None:
-    """TShark 종료 후 예상 디렉터리 외 산출물이 남지 않았는지 확인한다."""
-
-    expected_directories = {path for path, _snapshot in prepared.directory_snapshots}
-    try:
-        _reject_existing_linked_components(prepared.root)
-        root_stat = os.lstat(prepared.root)
-        if (
-            _stat_is_link_or_reparse(root_stat)
-            or not stat.S_ISDIR(root_stat.st_mode)
-            or not _same_directory_identity(root_stat, prepared.root_snapshot)
-        ):
-            raise TSharkExecutionError("격리 작업공간 정체성이 변경됐습니다.")
-        discovered = set()
-        with os.scandir(prepared.root) as entries:
-            for entry in entries:
-                entry_path = Path(entry.path)
-                entry_stat = entry.stat(follow_symlinks=False)
-                if _stat_is_link_or_reparse(entry_stat) or not stat.S_ISDIR(entry_stat.st_mode):
-                    raise TSharkExecutionError("TShark가 승인되지 않은 산출물을 남겼습니다.")
-                discovered.add(entry_path)
-        if discovered != expected_directories:
-            raise TSharkExecutionError("TShark 격리 디렉터리 구성이 변경됐습니다.")
-        for directory, expected_snapshot in prepared.directory_snapshots:
-            current = os.lstat(directory)
-            if (
-                _stat_is_link_or_reparse(current)
-                or not stat.S_ISDIR(current.st_mode)
-                or not _same_directory_identity(current, expected_snapshot)
-            ):
-                raise TSharkExecutionError("TShark 격리 하위 경로가 교체됐습니다.")
-            with os.scandir(directory) as entries:
-                if next(entries, None) is not None:
-                    raise TSharkExecutionError("TShark가 격리 경로에 파일을 남겼습니다.")
-    except TSharkExecutionError:
-        raise
-    except (OSError, ValueError):
-        raise TSharkExecutionError("TShark 종료 후 격리 상태를 확인할 수 없습니다.") from None
 
 
 def build_isolated_environment(
@@ -372,261 +285,6 @@ def _stop_probe(process: object) -> None:
             pass
 
 
-def _put_stream_event(events, stop_event, value) -> None:
-    while not stop_event.is_set():
-        try:
-            events.put(value, timeout=0.1)
-            return
-        except queue.Full:
-            continue
-
-
-def _pump_stream(name: str, stream, events, stop_event: threading.Event) -> None:
-    try:
-        while not stop_event.is_set():
-            chunk = stream.read(_STREAM_CHUNK_BYTES)
-            if not chunk:
-                break
-            _put_stream_event(events, stop_event, (name, "data", chunk))
-    except (OSError, ValueError):
-        _put_stream_event(events, stop_event, (name, "error", b""))
-    finally:
-        _put_stream_event(events, stop_event, (name, "eof", b""))
-
-
-def _run_bounded_utf8(
-    bundle: VerifiedBundle,
-    prepared_isolation: _PreparedIsolation,
-    arguments: Tuple[str, ...],
-    *,
-    timeout_seconds: int,
-    max_stdout_bytes: int,
-    max_stderr_bytes: int,
-    cancel_event: Optional[threading.Event],
-) -> str:
-    """출력을 파일에 남기지 않고 고정 상한 내 UTF-8 텍스트만 반환한다."""
-
-    if not 1 <= timeout_seconds <= 600:
-        raise TSharkExecutionError("TShark 실행 제한시간이 올바르지 않습니다.")
-    if not 1024 <= max_stdout_bytes <= 256 * 1024 * 1024:
-        raise TSharkExecutionError("TShark 표준 출력 제한이 올바르지 않습니다.")
-    if not 1024 <= max_stderr_bytes <= 8 * 1024 * 1024:
-        raise TSharkExecutionError("TShark 표준 오류 제한이 올바르지 않습니다.")
-    if cancel_event is not None and cancel_event.is_set():
-        raise TSharkExecutionError("TShark 실행이 취소됐습니다.")
-
-    _validate_prepared_isolation(prepared_isolation)
-    revalidate_bundle_snapshot(bundle)
-    deadline = time.monotonic() + timeout_seconds
-    try:
-        process = subprocess.Popen(
-            list(arguments),
-            shell=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=prepared_isolation.environment,
-            cwd=str(bundle.root),
-            close_fds=True,
-        )
-    except OSError:
-        raise TSharkExecutionError("TShark 실행을 시작할 수 없습니다.") from None
-    if process.stdout is None or process.stderr is None:
-        _stop_probe(process)
-        raise TSharkExecutionError("TShark 출력 파이프를 만들 수 없습니다.")
-
-    events = queue.Queue(maxsize=32)
-    stop_event = threading.Event()
-    threads = (
-        threading.Thread(
-            target=_pump_stream,
-            args=("stdout", process.stdout, events, stop_event),
-            daemon=True,
-        ),
-        threading.Thread(
-            target=_pump_stream,
-            args=("stderr", process.stderr, events, stop_event),
-            daemon=True,
-        ),
-    )
-    for reader in threads:
-        reader.start()
-
-    stdout_chunks = []
-    stdout_size = 0
-    stderr_size = 0
-    eof = set()
-    failed_reader = False
-    return_code = None
-    try:
-        while len(eof) < 2:
-            if cancel_event is not None and cancel_event.is_set():
-                raise TSharkExecutionError("TShark 실행이 취소됐습니다.")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TSharkExecutionError("TShark 실행 제한시간을 초과했습니다.")
-            try:
-                name, event_type, chunk = events.get(timeout=min(0.1, remaining))
-            except queue.Empty:
-                continue
-            if event_type == "eof":
-                eof.add(name)
-                continue
-            if event_type == "error":
-                failed_reader = True
-                continue
-            if name == "stdout":
-                stdout_size += len(chunk)
-                if stdout_size > max_stdout_bytes:
-                    raise TSharkExecutionError("TShark 표준 출력이 안전 제한을 초과했습니다.")
-                stdout_chunks.append(chunk)
-            else:
-                stderr_size += len(chunk)
-                if stderr_size > max_stderr_bytes:
-                    raise TSharkExecutionError("TShark 표준 오류가 안전 제한을 초과했습니다.")
-        if failed_reader:
-            raise TSharkExecutionError("TShark 출력을 안전하게 읽을 수 없습니다.")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TSharkExecutionError("TShark 실행 제한시간을 초과했습니다.")
-        return_code = process.wait(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        _stop_probe(process)
-        raise TSharkExecutionError("TShark 실행 제한시간을 초과했습니다.") from None
-    except TSharkExecutionError:
-        _stop_probe(process)
-        raise
-    except (OSError, subprocess.SubprocessError):
-        _stop_probe(process)
-        raise TSharkExecutionError("TShark 실행을 완료할 수 없습니다.") from None
-    finally:
-        stop_event.set()
-        try:
-            process.stdout.close()
-        except (OSError, ValueError):
-            pass
-        try:
-            process.stderr.close()
-        except (OSError, ValueError):
-            pass
-        for reader in threads:
-            reader.join(timeout=1)
-
-    if return_code != 0:
-        raise TSharkExecutionError("TShark가 프로토콜 메타데이터 추출에 실패했습니다.")
-    revalidate_bundle_snapshot(bundle)
-    _validate_post_execution_isolation(prepared_isolation)
-    try:
-        text = b"".join(stdout_chunks).decode("utf-8", errors="strict")
-    except UnicodeDecodeError:
-        raise TSharkExecutionError("TShark 출력이 올바른 UTF-8이 아닙니다.") from None
-    if "\x00" in text:
-        raise TSharkExecutionError("TShark 출력에 허용되지 않은 NUL 문자가 있습니다.")
-    return text
-
-
-def _same_capture(first: CaptureInfo, second: CaptureInfo) -> bool:
-    return (
-        first.path == second.path
-        and first.capture_format == second.capture_format
-        and first.size_bytes == second.size_bytes
-        and first.sha256 == second.sha256
-    )
-
-
-def run_field_catalog(
-    vendor_root: Path,
-    isolation_root: Path,
-    *,
-    timeout_seconds: int = 60,
-    cancel_event: Optional[threading.Event] = None,
-) -> FieldCatalogRun:
-    """승인 번들의 필드 등록 정보를 외부 저장 없이 검사한다."""
-
-    initial_bundle = verify_bundle(vendor_root)
-    prepared = _prepare_isolated_environment(isolation_root)
-    bundle = verify_bundle(vendor_root)
-    if bundle != initial_bundle:
-        raise TSharkExecutionError("TShark 번들이 필드 검사 전에 변경됐습니다.")
-    arguments = tuple(build_field_catalog_argv(bundle))
-    text = _run_bounded_utf8(
-        bundle,
-        prepared,
-        arguments,
-        timeout_seconds=timeout_seconds,
-        max_stdout_bytes=64 * 1024 * 1024,
-        max_stderr_bytes=1024 * 1024,
-        cancel_event=cancel_event,
-    )
-    catalog = parse_field_catalog(text.splitlines(keepends=True))
-    return FieldCatalogRun(bundle.version, bundle.manifest_sha256, catalog)
-
-
-def run_protocol_inventory(
-    vendor_root: Path,
-    capture_path: Path,
-    isolation_parent: Path,
-    profile_path: Path,
-    *,
-    expected_frames: Optional[int],
-    timeout_seconds: int = 180,
-    cancel_event: Optional[threading.Event] = None,
-) -> ProtocolInventoryRun:
-    """식별자 없이 프로토콜 존재 프레임 수만 집계한다."""
-
-    if not isolation_parent.is_dir():
-        raise TSharkExecutionError("분석 작업공간이 준비되지 않았습니다.")
-    initial_capture = validate_capture(capture_path, cancel_event=cancel_event)
-    registry = load_field_profiles(profile_path)
-    catalog_run = run_field_catalog(
-        vendor_root,
-        isolation_parent / "field-catalog",
-        timeout_seconds=min(timeout_seconds, 60),
-        cancel_event=cancel_event,
-    )
-    current_capture = validate_capture(capture_path, cancel_event=cancel_event)
-    if not _same_capture(initial_capture, current_capture):
-        raise TSharkExecutionError("캡처 파일이 필드 검사 중 변경됐습니다.")
-    profile = resolve_profile(registry, catalog_run.catalog, "protocol-inventory")
-
-    initial_bundle = verify_bundle(vendor_root)
-    if (
-        initial_bundle.version != catalog_run.bundle_version
-        or initial_bundle.manifest_sha256 != catalog_run.manifest_sha256
-    ):
-        raise TSharkExecutionError("TShark 번들이 필드 검사 이후 변경됐습니다.")
-    prepared = _prepare_isolated_environment(isolation_parent / "protocol-inventory")
-    bundle = verify_bundle(vendor_root)
-    if bundle != initial_bundle:
-        raise TSharkExecutionError("TShark 번들이 인벤토리 실행 전에 변경됐습니다.")
-    arguments = tuple(build_profile_argv(bundle, capture_path, profile))
-    text = _run_bounded_utf8(
-        bundle,
-        prepared,
-        arguments,
-        timeout_seconds=timeout_seconds,
-        max_stdout_bytes=64 * 1024 * 1024,
-        max_stderr_bytes=1024 * 1024,
-        cancel_event=cancel_event,
-    )
-    final_capture = validate_capture(capture_path, cancel_event=cancel_event)
-    if not _same_capture(initial_capture, final_capture):
-        raise TSharkExecutionError("캡처 파일이 프로토콜 검사 중 변경됐습니다.")
-    inventory = build_protocol_inventory(
-        text,
-        profile,
-        registry.protocol_groups,
-        expected_frames=expected_frames,
-    )
-    return ProtocolInventoryRun(
-        bundle_version=bundle.version,
-        manifest_sha256=bundle.manifest_sha256,
-        resolved_profile=profile,
-        catalog_records=catalog_run.catalog.records_scanned,
-        inventory=inventory,
-    )
-
-
 def probe_bundle_runtime(
     vendor_root: Path,
     isolation_root: Path,
@@ -643,6 +301,8 @@ def probe_bundle_runtime(
     initial_bundle = verify_bundle(vendor_root)
     source_environment = dict(os.environ)
     prepared_isolation = _prepare_isolated_environment(isolation_root, source_environment)
+    # 디렉터리 준비 중 공급망 파일이 바뀌는 경우를 막기 위해 실제 실행 직전에
+    # 전체 매니페스트, 크기, 동일 핸들 해시, 경로 정체성을 다시 검증한다.
     bundle = verify_bundle(vendor_root)
     if bundle != initial_bundle:
         raise TSharkExecutionError("TShark 번들이 준비 확인 전에 변경됐습니다.")
