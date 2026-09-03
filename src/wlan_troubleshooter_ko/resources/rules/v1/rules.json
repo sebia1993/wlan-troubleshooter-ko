@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "ruleset_version": "0.1.0",
+  "classifications": [
+    "확정",
+    "유력",
+    "참고",
+    "판단 불가"
+  ],
+  "rules": []
+}

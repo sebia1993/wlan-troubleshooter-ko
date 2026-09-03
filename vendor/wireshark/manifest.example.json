@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "version": "APPROVED_VERSION",
+  "approval_reference": "INTERNAL_APPROVAL_REFERENCE",
+  "executable": "tshark.exe",
+  "files": [
+    {
+      "path": "tshark.exe",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 0
+    },
+    {
+      "path": "COPYING",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 0
+    }
+  ]
+}
