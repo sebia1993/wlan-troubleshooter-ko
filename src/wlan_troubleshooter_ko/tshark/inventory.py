@@ -1,4 +1,4 @@
-"""실행 전 준비와 실제 Phase 4A 프로토콜 인벤토리 오케스트레이션."""
+"""실행 전 준비와 실제 TShark 프로토콜·접속 단계 분석 오케스트레이션."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Tuple
 
+from wlan_troubleshooter_ko.analysis.event_correlation import (
+    EventCorrelation,
+    build_event_correlation,
+)
 from wlan_troubleshooter_ko.analysis.protocol_inventory import (
     ProtocolInventory,
     build_protocol_inventory,
@@ -119,13 +123,14 @@ class PreparedProtocolInventoryInvocation:
 
 @dataclass(frozen=True)
 class ProtocolInventoryRun:
-    """실제 TShark 실행에서 정규화된 식별자 없는 인벤토리 결과."""
+    """실제 TShark 실행에서 정규화된 식별자 없는 분석 결과."""
 
     bundle_version: str
     manifest_sha256: str
     resolved_profile: ResolvedProfile
     catalog_records: int
     inventory: ProtocolInventory
+    event_correlation: Optional[EventCorrelation] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -136,6 +141,11 @@ class ProtocolInventoryRun:
             "resolved_fields": list(self.resolved_profile.headers()),
             "catalog_records": self.catalog_records,
             "inventory": self.inventory.to_dict(),
+            "event_correlation": (
+                None
+                if self.event_correlation is None
+                else self.event_correlation.to_dict()
+            ),
         }
 
 
@@ -180,6 +190,26 @@ def prepare_protocol_inventory_invocation(
     )
 
 
+def _catalog_and_profile(
+    vendor_root: Path,
+    workspace_root: Path,
+    profile_path: Path,
+    profile_id: str,
+    timeout_seconds: int,
+    cancel_event: Optional[threading.Event],
+) -> Tuple[object, FieldCatalog, ResolvedProfile]:
+    registry = load_field_profiles(profile_path)
+    catalog_result = run_field_catalog_text(
+        vendor_root,
+        workspace_root / "field-catalog",
+        timeout_seconds=min(timeout_seconds, 60),
+        cancel_event=cancel_event,
+    )
+    catalog = parse_field_catalog(catalog_result.text.splitlines(keepends=True))
+    resolved_profile = resolve_profile(registry, catalog, profile_id)
+    return registry, catalog, resolved_profile
+
+
 def run_protocol_inventory(
     vendor_root: Path,
     capture_path: Path,
@@ -190,7 +220,7 @@ def run_protocol_inventory(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> ProtocolInventoryRun:
-    """실제 저장 캡처에서 프로토콜 존재 프레임만 안전하게 집계한다."""
+    """기존 최소 프로파일로 프로토콜 존재 프레임만 집계한다."""
 
     if not workspace_root.is_dir():
         raise TSharkExecutionError("프로토콜 분석 작업공간이 준비되지 않았습니다.")
@@ -199,16 +229,14 @@ def run_protocol_inventory(
     ):
         raise TSharkExecutionError("예상 프레임 수가 올바르지 않습니다.")
 
-    registry = load_field_profiles(profile_path)
-    catalog_result = run_field_catalog_text(
+    registry, catalog, resolved_profile = _catalog_and_profile(
         vendor_root,
-        workspace_root / "field-catalog",
-        timeout_seconds=min(timeout_seconds, 60),
-        cancel_event=cancel_event,
+        workspace_root,
+        profile_path,
+        "protocol-inventory",
+        timeout_seconds,
+        cancel_event,
     )
-    catalog = parse_field_catalog(catalog_result.text.splitlines(keepends=True))
-    resolved_profile = resolve_profile(registry, catalog, "protocol-inventory")
-
     fields_result = run_profile_fields_text(
         vendor_root,
         capture_path,
@@ -217,11 +245,6 @@ def run_protocol_inventory(
         timeout_seconds=timeout_seconds,
         cancel_event=cancel_event,
     )
-    if (
-        fields_result.bundle_version != catalog_result.bundle_version
-        or fields_result.manifest_sha256 != catalog_result.manifest_sha256
-    ):
-        raise TSharkExecutionError("TShark 번들이 필드 검사와 프로토콜 검사 사이에 변경됐습니다.")
 
     inventory = build_protocol_inventory(
         fields_result.text,
@@ -235,4 +258,65 @@ def run_protocol_inventory(
         resolved_profile=resolved_profile,
         catalog_records=catalog.records_scanned,
         inventory=inventory,
+    )
+
+
+def run_connection_analysis(
+    vendor_root: Path,
+    capture_path: Path,
+    workspace_root: Path,
+    profile_path: Path,
+    ruleset: Mapping[str, object],
+    *,
+    expected_frames: Optional[int],
+    has_80211_link_type: bool,
+    timeout_seconds: int = 180,
+    cancel_event: Optional[threading.Event] = None,
+) -> ProtocolInventoryRun:
+    """한 번의 fields 출력에서 인벤토리와 접속 단계 Finding을 함께 만든다."""
+
+    if not workspace_root.is_dir():
+        raise TSharkExecutionError("접속 단계 분석 작업공간이 준비되지 않았습니다.")
+    if expected_frames is not None and (
+        type(expected_frames) is not int or expected_frames < 0
+    ):
+        raise TSharkExecutionError("예상 프레임 수가 올바르지 않습니다.")
+
+    registry, catalog, resolved_profile = _catalog_and_profile(
+        vendor_root,
+        workspace_root,
+        profile_path,
+        "connection-events",
+        timeout_seconds,
+        cancel_event,
+    )
+    fields_result = run_profile_fields_text(
+        vendor_root,
+        capture_path,
+        workspace_root / "connection-events",
+        resolved_profile,
+        timeout_seconds=timeout_seconds,
+        cancel_event=cancel_event,
+    )
+
+    inventory = build_protocol_inventory(
+        fields_result.text,
+        resolved_profile,
+        registry.protocol_groups,
+        expected_frames=expected_frames,
+    )
+    correlation = build_event_correlation(
+        fields_result.text,
+        resolved_profile,
+        ruleset,
+        expected_frames=expected_frames,
+        has_80211_link_type=has_80211_link_type,
+    )
+    return ProtocolInventoryRun(
+        bundle_version=fields_result.bundle_version,
+        manifest_sha256=fields_result.manifest_sha256,
+        resolved_profile=resolved_profile,
+        catalog_records=catalog.records_scanned,
+        inventory=inventory,
+        event_correlation=correlation,
     )

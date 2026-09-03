@@ -18,12 +18,42 @@ APPROVED_FIELDS = (
     "frame.cap_len",
     "frame.len",
     "frame.protocols",
+    "wlan.fc.type_subtype",
+    "wlan.fixed.status_code",
+    "wlan.fixed.reason_code",
+    "eapol.type",
+    "eap.code",
+    "eap.id",
+    "eap.type",
+    "radius.code",
+    "radius.id",
+    "dhcp.id",
+    "dhcp.option.dhcp",
+    "dns.id",
+    "dns.flags.response",
+    "dns.flags.rcode",
+    "udp.stream",
+    "arp.opcode",
+    "tcp.stream",
+    "tcp.flags.syn",
+    "tcp.flags.ack",
+    "tcp.flags.reset",
+    "tcp.analysis.retransmission",
 )
-_PROTOCOL_INVENTORY_REQUIRED_FIELDS = {
-    "frame.number",
-    "frame.cap_len",
-    "frame.len",
-    "frame.protocols",
+_PROFILE_REQUIRED_FIELDS = {
+    "protocol-inventory": {
+        "frame.number",
+        "frame.cap_len",
+        "frame.len",
+        "frame.protocols",
+    },
+    "connection-events": {
+        "frame.number",
+        "frame.time_epoch",
+        "frame.cap_len",
+        "frame.len",
+        "frame.protocols",
+    },
 }
 _FIELD_OUTPUT_PREFIX = [
     "-T",
@@ -184,9 +214,7 @@ def assert_safe_profile_argv(arguments: List[str]) -> None:
         raise TSharkPolicyError("fields 출력 옵션이 승인된 고정 형식과 다릅니다.")
     if arguments[19] != "-Y" or arguments[20] not in APPROVED_DISPLAY_FILTERS.values():
         raise TSharkPolicyError("승인되지 않은 Display Filter입니다.")
-    fields = _read_field_pairs(arguments, 21)
-    if not _PROTOCOL_INVENTORY_REQUIRED_FIELDS.issubset(fields):
-        raise TSharkPolicyError("프로토콜 인벤토리 필수 필드가 누락됐습니다.")
+    _read_field_pairs(arguments, 21)
 
 
 def build_profile_argv(
@@ -199,11 +227,12 @@ def build_profile_argv(
     capture = validate_capture(capture_path)
     try:
         display_filter = APPROVED_DISPLAY_FILTERS[profile.display_filter_name]
+        required_fields = _PROFILE_REQUIRED_FIELDS[profile.profile_id]
     except KeyError as exc:
-        raise TSharkPolicyError("승인되지 않은 Display Filter입니다.") from exc
+        raise TSharkPolicyError("승인되지 않은 추출 프로파일입니다.") from exc
     selected_fields = _canonical_fields(list(profile.headers()))
-    if not _PROTOCOL_INVENTORY_REQUIRED_FIELDS.issubset(selected_fields):
-        raise TSharkPolicyError("프로토콜 인벤토리 필수 필드가 누락됐습니다.")
+    if not required_fields.issubset(selected_fields):
+        raise TSharkPolicyError("추출 프로파일 필수 필드가 누락됐습니다.")
 
     arguments = [
         str(bundle.executable),

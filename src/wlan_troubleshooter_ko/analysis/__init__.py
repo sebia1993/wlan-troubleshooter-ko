@@ -1,5 +1,12 @@
-"""결정론적 캡처 점검과 프로토콜 인벤토리 계층."""
+"""결정론적 캡처 점검, 프로토콜 인벤토리와 접속 단계 상관분석."""
 
+from wlan_troubleshooter_ko.analysis.event_correlation import (
+    DiagnosticFinding,
+    EventCorrelation,
+    EventCorrelationError,
+    StageSummary,
+    build_event_correlation,
+)
 from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
     CaptureStructure,
@@ -28,11 +35,16 @@ __all__ = [
     "CaptureCapabilityReport",
     "CaptureStructure",
     "CaptureStructureError",
+    "DiagnosticFinding",
+    "EventCorrelation",
+    "EventCorrelationError",
     "InterfaceSummary",
     "ProtocolInventory",
     "ProtocolInventoryError",
     "ProtocolObservation",
+    "StageSummary",
     "analyze_capture",
+    "build_event_correlation",
     "build_protocol_inventory",
     "classify_capture_capabilities",
     "inspect_capture_structure",

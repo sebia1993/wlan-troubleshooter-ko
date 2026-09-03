@@ -45,11 +45,35 @@ class TSharkCatalogTests(unittest.TestCase):
         catalog = parse_field_catalog(CATALOG_LINES)
         registry = load_field_profiles(self.registry_path())
         resolved = resolve_profile(registry, catalog, "protocol-inventory")
-        self.assertEqual(resolved.profile_version, "0.2.0")
+        self.assertEqual(resolved.profile_version, "0.3.0")
         self.assertEqual(resolved.headers()[0], "frame.number")
         self.assertEqual(resolved.output_keys()[-1], "protocols")
         self.assertEqual(resolved.missing_optional_fields, ())
+        self.assertEqual(
+            {item.profile_id for item in registry.profiles},
+            {"protocol-inventory", "connection-events"},
+        )
         self.assertTrue(catalog.has_field("frame.protocols"))
+
+    def test_connection_profile_requires_time_epoch(self):
+        registry = load_field_profiles(self.registry_path())
+        with self.assertRaises(FieldCompatibilityError):
+            resolve_profile(
+                registry,
+                parse_field_catalog(CATALOG_LINES),
+                "connection-events",
+            )
+
+        catalog = parse_field_catalog(
+            CATALOG_LINES
+            + [
+                "F\tEpoch time\tframe.time_epoch\tFT_RELATIVE_TIME\tframe\t\t0x0\t\n"
+            ]
+        )
+        resolved = resolve_profile(registry, catalog, "connection-events")
+        self.assertEqual(resolved.profile_version, "0.3.0")
+        self.assertIn("frame.time_epoch", resolved.headers())
+        self.assertIn("eap_code", resolved.missing_optional_fields)
 
     def test_missing_optional_field_is_recorded(self):
         catalog = parse_field_catalog(
@@ -112,7 +136,7 @@ class TSharkCatalogTests(unittest.TestCase):
 
             duplicate = Path(directory) / "duplicate.json"
             duplicate.write_text(
-                '{"schema_version":1,"schema_version":1,"profile_version":"0.2.0","profiles":[],"protocol_groups":[]}',
+                '{"schema_version":1,"schema_version":1,"profile_version":"0.3.0","profiles":[],"protocol_groups":[]}',
                 encoding="utf-8",
             )
             with self.assertRaises(FieldProfileError):

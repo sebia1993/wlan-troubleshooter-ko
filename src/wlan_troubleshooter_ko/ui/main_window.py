@@ -1,4 +1,4 @@
-"""캡처 구조와 실제 프로토콜 존재 인벤토리를 보여 주는 로컬 GUI."""
+"""캡처 구조, 프로토콜 인벤토리와 접속 단계 Finding을 보여 주는 GUI."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
@@ -39,20 +39,27 @@ def _compact(items: Tuple[str, ...], limit: int = 5) -> str:
     return " · ".join(visible)
 
 
+def _frames(values: Iterable[int]) -> str:
+    items = tuple(values)
+    if not items:
+        return "없음"
+    return ", ".join("#{0:,}".format(value) for value in items)
+
+
 def _portable_status(bundle_status: BundleStatus) -> str:
     resources = Path(__file__).resolve().parents[1] / "resources"
     try:
         registry = load_field_profiles(resources / "tshark" / "field-profiles.v1.json")
-        profile = registry.get_profile("protocol-inventory")
+        profile = registry.get_profile("connection-events")
     except FieldProfileError:
-        return "프로토콜 인벤토리 프로파일 오류 · 배포본을 다시 받아야 합니다."
-    base = "필드 프로파일 {0} · 승인 필드 {1}개 · 프로토콜 그룹 {2}개".format(
+        return "접속 단계 프로파일 오류 · 배포본을 다시 받아야 합니다."
+    base = "필드 프로파일 {0} · 접속 분석 필드 {1}개 · 프로토콜 그룹 {2}개".format(
         registry.profile_version,
         len(profile.fields),
         len(registry.protocol_groups),
     )
     if bundle_status.code == "integrity_verified":
-        return base + " · 내장 TShark 무결성 확인됨 · 실제 인벤토리 사용 가능"
+        return base + " · 내장 TShark 무결성 확인됨 · 접속 단계 분석 사용 가능"
     return base + " · 소스 실행 모드 · Portable 배포본에서는 내장 TShark가 사용됩니다."
 
 
@@ -64,6 +71,7 @@ def _format_preflight(
     report: CaptureCapabilityReport,
 ) -> str:
     return (
+        "[1. 캡처 사전 점검]\n"
         "선택 파일: 파일명 비공개 · 형식: {format_name} · 크기: {size:,}바이트 · "
         "SHA-256: {digest}…\n"
         "캡처 유형 추정: {kind}\n"
@@ -72,7 +80,7 @@ def _format_preflight(
         "잘린 패킷 {truncated:,}개 · 전체 점검 {complete}\n"
         "형식상 확인 가능: {available}\n"
         "현재 확인 불가: {unavailable}\n"
-        "사전 점검 주의: {cautions}"
+        "주의: {cautions}"
     ).format(
         format_name=capture_format.upper(),
         size=size_bytes,
@@ -122,15 +130,20 @@ def _format_observations(result: CaptureAnalysisResult) -> str:
         )
     if not observed:
         observed.append("- 승인된 프로토콜 그룹이 관찰되지 않았습니다.")
-    expected = "알 수 없음" if inventory.expected_frames is None else "{0:,}".format(inventory.expected_frames)
+    expected = (
+        "알 수 없음"
+        if inventory.expected_frames is None
+        else "{0:,}".format(inventory.expected_frames)
+    )
     return (
-        "\n\n프로토콜 존재 인벤토리: {state}\n"
+        "\n\n[2. 프로토콜 존재 인벤토리]\n"
+        "처리 범위: {state}\n"
         "TShark {version} · 관찰 프레임 {frames:,}개 / 사전 점검 {expected}개 · "
         "잘린 프레임 {truncated:,}개\n"
         "관찰됨:\n{observed}\n"
         "관찰되지 않음: {not_observed}\n"
-        "인벤토리 주의: {cautions}\n"
-        "중요: 프로토콜이 보였다는 사실은 성공을 뜻하지 않고, 보이지 않았다는 사실도 장애 증거가 아닙니다."
+        "주의: {cautions}\n"
+        "프로토콜이 보였다는 사실은 성공을 뜻하지 않고, 보이지 않았다는 사실도 장애 증거가 아닙니다."
     ).format(
         state="전체" if inventory.complete else "일부 또는 판단 불가",
         version=run.bundle_version,
@@ -143,6 +156,70 @@ def _format_observations(result: CaptureAnalysisResult) -> str:
     )
 
 
+def _format_correlation(result: CaptureAnalysisResult) -> str:
+    run = result.protocol_inventory
+    if run is None or run.event_correlation is None:
+        return "\n\n[3. 접속 단계 및 Finding]\n접속 단계 상관분석 결과가 없습니다."
+    correlation = run.event_correlation
+    state_names = {
+        "success": "성공 응답 관찰",
+        "failure": "실패 응답 관찰",
+        "mixed": "성공·실패 혼합",
+        "incomplete": "진행 중 또는 불완전",
+        "not_observed": "관찰되지 않음",
+        "unavailable": "판단 불가",
+    }
+    stage_lines = []
+    for stage in correlation.stages:
+        stage_lines.append(
+            "- [{state}] {label}: {summary} · 근거 {frames}".format(
+                state=state_names.get(stage.state, stage.state),
+                label=stage.label_ko,
+                summary=stage.summary_ko,
+                frames=_frames(stage.evidence_frames),
+            )
+        )
+
+    finding_lines = []
+    for index, finding in enumerate(correlation.findings, start=1):
+        checks = " / ".join(
+            "{0}) {1}".format(number, value)
+            for number, value in enumerate(finding.next_checks, start=1)
+        )
+        finding_lines.append(
+            "{index}. [{classification}] {title}\n"
+            "   단계: {stage}\n"
+            "   설명: {summary}\n"
+            "   근거 프레임: {frames}\n"
+            "   Wireshark 필터: {display_filter}\n"
+            "   다음 확인: {checks}".format(
+                index=index,
+                classification=finding.classification,
+                title=finding.title_ko,
+                stage=finding.stage_id,
+                summary=finding.summary_ko,
+                frames=_frames(finding.evidence_frames),
+                display_filter=finding.display_filter,
+                checks=checks,
+            )
+        )
+    if not finding_lines:
+        finding_lines.append(
+            "명시적인 실패 응답 Finding은 관찰되지 않았습니다. "
+            "캡처 누락 가능성이 있으므로 전체 정상으로 확정하지 않습니다."
+        )
+
+    return (
+        "\n\n[3. 접속 단계 요약]\n{stages}\n"
+        "\n[4. 근거 기반 Finding]\n{findings}\n"
+        "\n분석 주의: {cautions}"
+    ).format(
+        stages="\n".join(stage_lines),
+        findings="\n\n".join(finding_lines),
+        cautions=_compact(correlation.cautions, limit=8),
+    )
+
+
 def format_analysis_detail(result: CaptureAnalysisResult) -> str:
     detail = _format_preflight(
         result.capture_format,
@@ -152,14 +229,14 @@ def format_analysis_detail(result: CaptureAnalysisResult) -> str:
         result.capabilities,
     )
     if result.inventory_state == "completed":
-        return detail + _format_observations(result)
+        return detail + _format_observations(result) + _format_correlation(result)
     return (
         detail
-        + "\n\n프로토콜 존재 인벤토리: "
+        + "\n\n[2. 프로토콜 및 접속 단계 분석]\n"
         + ("실행 안 함" if result.inventory_state == "unavailable" else "실패")
-        + "\n"
+        + ": "
         + result.inventory_message
-        + "\n사전 점검 결과는 유지되지만 실제 프로토콜 존재 여부는 확정하지 않습니다."
+        + "\n사전 점검 결과는 유지되지만 프로토콜·접속 단계 결과는 확정하지 않습니다."
     )
 
 
@@ -228,9 +305,9 @@ class CaptureViewModel:
         self.capabilities = result.capabilities
         self.analysis_result = result
         if result.inventory_state == "completed":
-            status = "캡처 구조와 프로토콜 존재 인벤토리를 완료했습니다."
+            status = "캡처 구조·프로토콜 인벤토리·접속 단계 분석을 완료했습니다."
         elif result.inventory_state == "failed":
-            status = "캡처 사전 점검은 완료했지만 프로토콜 인벤토리에 실패했습니다."
+            status = "캡처 사전 점검은 완료했지만 접속 단계 분석에 실패했습니다."
         else:
             status = "캡처 사전 점검을 완료했습니다."
         self.state = CaptureViewState(
@@ -264,7 +341,7 @@ class MainWindow:
 
     def _build(self) -> None:
         self._root.title("WLAN 장애 분석기 KO")
-        self._root.minsize(860, 680)
+        self._root.minsize(900, 720)
 
         frame = ttk.Frame(self._root, padding=24)
         frame.pack(fill="both", expand=True)
@@ -272,12 +349,12 @@ class MainWindow:
         ttk.Label(frame, text="완전 오프라인", style="Accent.TLabel").pack(anchor="w")
         ttk.Label(
             frame,
-            text="무선 네트워크 패킷 분석",
+            text="무선 네트워크 패킷 장애 분석",
             font=("TkDefaultFont", 18, "bold"),
         ).pack(anchor="w", pady=(12, 4))
         ttk.Label(
             frame,
-            text="캡처 구조 점검 + 내장 TShark 프로토콜 존재 인벤토리",
+            text="캡처 구조 · 프로토콜 인벤토리 · 접속 단계 · 근거 기반 Finding",
         ).pack(anchor="w")
 
         ttk.Separator(frame).pack(fill="x", pady=16)
@@ -310,7 +387,7 @@ class MainWindow:
         self._detail_text = tk.Text(
             result_frame,
             wrap="word",
-            height=22,
+            height=24,
             padx=12,
             pady=10,
             state="disabled",
@@ -334,12 +411,15 @@ class MainWindow:
         ttk.Label(
             frame,
             textvariable=self._portable_status,
-            wraplength=800,
+            wraplength=840,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Label(
             frame,
-            text="현재 버전은 프로토콜 존재 여부만 보여 주며 장애 원인 판정은 아직 지원하지 않습니다.",
-            wraplength=800,
+            text=(
+                "명시적 실패 응답은 근거 프레임과 함께 표시합니다. "
+                "응답이 보이지 않은 경우에는 장애로 확정하지 않습니다."
+            ),
+            wraplength=840,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Button(frame, text="종료", command=self._close).pack(anchor="e", pady=(12, 0))
 
@@ -371,7 +451,7 @@ class MainWindow:
         self._validation_cancel.set()
         cancel_event = threading.Event()
         self._validation_cancel = cancel_event
-        self._status.set("캡처 구조와 프로토콜 존재 여부를 분석하고 있습니다.")
+        self._status.set("캡처 구조와 접속 단계를 분석하고 있습니다.")
         self._set_detail(
             "파일명과 패킷 원문은 화면과 로그에 표시하지 않습니다. "
             "큰 캡처는 시간이 걸릴 수 있으며 언제든 분석 취소를 누를 수 있습니다."

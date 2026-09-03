@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   portable:
-    name: Build and verify Win64 portable package
+    name: Build and verify Win64 portable Finding package
     runs-on: windows-latest
-    timeout-minutes: 55
+    timeout-minutes: 60
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -58,7 +58,7 @@ jobs:
               throw "PyInstaller version does not match the pinned supply-chain value."
           }
 
-      - name: Build, finalize, and verify Python-free Portable package
+      - name: Build, finalize, and verify Python-free Finding package
         shell: pwsh
         run: |
           $Output = Join-Path $env:RUNNER_TEMP "portable-output"

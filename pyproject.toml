@@ -1,6 +1,6 @@
 [project]
 name = "wlan-troubleshooter-ko"
-version = "0.4.0a1"
+version = "0.5.0a1"
 description = "Windows 11용 완전 오프라인 한국어 무선 네트워크 PCAP 장애 분석기"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -15,12 +15,12 @@ wlan-troubleshooter-ko = "wlan_troubleshooter_ko.app:main"
 
 [tool.wlan-troubleshooter-ko]
 runtime-dependencies = []
-ruleset-version = "0.1.0"
-field-profile-version = "0.2.0"
-phase = "4A"
+ruleset-version = "0.2.0"
+field-profile-version = "0.3.0"
+phase = "4B"
 portable-python = "3.13"
 portable-pyinstaller = "6.22.2"
 portable-wireshark = "4.6.8"
-release-tag = "v0.4.0-alpha.1"
-release-title = "v0.4.0-alpha.1 — 내장 TShark 프로토콜 인벤토리 프리뷰"
+release-tag = "v0.5.0-alpha.1"
+release-title = "v0.5.0-alpha.1 — 접속 단계 상관분석·근거 Finding 프리뷰"
 release-prerelease = true

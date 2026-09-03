@@ -83,7 +83,7 @@ class PortableSupplyChainTests(unittest.TestCase):
         ):
             self.assertIn(value, text)
 
-    def test_portable_workflows_run_real_inventory_gate(self):
+    def test_portable_workflows_run_real_finding_gate(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -91,10 +91,19 @@ class PortableSupplyChainTests(unittest.TestCase):
             text = (self.root / relative).read_text(encoding="utf-8")
             self.assertIn("verify_protocol_inventory.ps1", text)
         verifier = (self.support / "verify_protocol_inventory.ps1").read_text(encoding="utf-8")
-        self.assertIn("--analyze-capture", verifier)
-        self.assertIn("frames_observed", verifier)
-        self.assertIn('"arp"', verifier)
-        self.assertIn('"dns"', verifier)
+        for value in (
+            "--analyze-capture",
+            "frames_observed",
+            '"arp"',
+            '"dns"',
+            '"tcp"',
+            '"DNS-ERROR-RESPONSE"',
+            '"TCP-RST"',
+            "event_correlation",
+            "evidence_frames",
+            "display_filter",
+        ):
+            self.assertIn(value, verifier)
 
 
 if __name__ == "__main__":

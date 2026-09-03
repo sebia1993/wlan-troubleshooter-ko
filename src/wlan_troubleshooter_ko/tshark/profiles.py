@@ -17,6 +17,21 @@ _KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _FIELD_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 _VERSION_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z.-]+)?$")
 _MAX_PROFILE_BYTES = 1024 * 1024
+_PROFILE_REQUIRED_OUTPUT_KEYS = {
+    "protocol-inventory": {
+        "frame_number",
+        "captured_length",
+        "frame_length",
+        "protocols",
+    },
+    "connection-events": {
+        "frame_number",
+        "time_epoch",
+        "captured_length",
+        "frame_length",
+        "protocols",
+    },
+}
 
 
 class FieldProfileError(ValueError):
@@ -151,6 +166,8 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
         filter_name = _normalized_text(profile_data["display_filter_name"], "필터 이름", 64)
         if not _ID_PATTERN.fullmatch(profile_id) or not _ID_PATTERN.fullmatch(filter_name):
             raise FieldProfileError("프로파일 또는 필터 식별자가 올바르지 않습니다.")
+        if profile_id not in _PROFILE_REQUIRED_OUTPUT_KEYS:
+            raise FieldProfileError("승인되지 않은 추출 프로파일 ID입니다.")
         if profile_id in profile_ids:
             raise FieldProfileError("추출 프로파일 ID가 중복됐습니다.")
         profile_ids.add(profile_id)
@@ -158,10 +175,11 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
         if type(max_packets) is not int or not 1 <= max_packets <= 500_000:
             raise FieldProfileError("프로파일 패킷 상한이 올바르지 않습니다.")
         raw_fields = profile_data["fields"]
-        if not isinstance(raw_fields, list) or not 2 <= len(raw_fields) <= 32:
+        if not isinstance(raw_fields, list) or not 2 <= len(raw_fields) <= 64:
             raise FieldProfileError("프로파일 필드 목록이 올바르지 않습니다.")
         requirements: List[FieldRequirement] = []
         output_keys = set()
+        all_candidates = set()
         for raw_field in raw_fields:
             field_data = _exact_keys(
                 raw_field,
@@ -178,17 +196,30 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
             candidates = []
             for candidate_value in candidates_value:
                 candidate = _normalized_text(candidate_value, "TShark 필드명", 128)
-                if not _FIELD_PATTERN.fullmatch(candidate) or candidate in candidates:
-                    raise FieldProfileError("TShark 필드명이 올바르지 않거나 중복됐습니다.")
+                if (
+                    not _FIELD_PATTERN.fullmatch(candidate)
+                    or candidate in candidates
+                    or candidate in all_candidates
+                ):
+                    raise FieldProfileError(
+                        "TShark 필드명이 올바르지 않거나 프로파일에서 중복됐습니다."
+                    )
                 candidates.append(candidate)
+                all_candidates.add(candidate)
             required = field_data["required"]
             if type(required) is not bool:
                 raise FieldProfileError("필수 필드 표시는 불리언이어야 합니다.")
             requirements.append(FieldRequirement(output_key, tuple(candidates), required))
         required_keys = {item.output_key for item in requirements if item.required}
-        if not {"frame_number", "protocols"}.issubset(required_keys):
-            raise FieldProfileError("프로토콜 인벤토리 필수 출력 키가 누락됐습니다.")
-        profiles.append(ExtractionProfile(profile_id, filter_name, max_packets, tuple(requirements)))
+        expected_required = _PROFILE_REQUIRED_OUTPUT_KEYS[profile_id]
+        if not expected_required.issubset(required_keys):
+            raise FieldProfileError("추출 프로파일 필수 출력 키가 누락됐습니다.")
+        profiles.append(
+            ExtractionProfile(profile_id, filter_name, max_packets, tuple(requirements))
+        )
+
+    if set(profile_ids) != set(_PROFILE_REQUIRED_OUTPUT_KEYS):
+        raise FieldProfileError("필수 추출 프로파일 구성이 완전하지 않습니다.")
 
     raw_groups = root["protocol_groups"]
     if not isinstance(raw_groups, list) or not raw_groups:
@@ -214,7 +245,9 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
         for token_value in tokens_value:
             token = _normalized_text(token_value, "프로토콜 토큰", 128)
             if not _FIELD_PATTERN.fullmatch(token) or token in claimed_tokens:
-                raise FieldProfileError("프로토콜 토큰이 올바르지 않거나 다른 그룹과 중복됐습니다.")
+                raise FieldProfileError(
+                    "프로토콜 토큰이 올바르지 않거나 다른 그룹과 중복됐습니다."
+                )
             claimed_tokens.add(token)
             tokens.append(token)
         groups.append(ProtocolGroup(group_id, label, tuple(tokens)))
@@ -233,7 +266,10 @@ def resolve_profile(
     missing_required = []
     missing_optional = []
     for requirement in profile.fields:
-        selected = next((item for item in requirement.candidates if item in available), None)
+        selected = next(
+            (item for item in requirement.candidates if item in available),
+            None,
+        )
         if selected is None:
             if requirement.required:
                 missing_required.append(requirement.output_key)
@@ -243,7 +279,8 @@ def resolve_profile(
         resolved.append(ResolvedField(requirement.output_key, selected))
     if missing_required:
         raise FieldCompatibilityError(
-            "현재 TShark에 필수 인벤토리 필드가 없습니다: " + ", ".join(sorted(missing_required))
+            "현재 TShark에 필수 추출 필드가 없습니다: "
+            + ", ".join(sorted(missing_required))
         )
     return ResolvedProfile(
         profile_id=profile.profile_id,
