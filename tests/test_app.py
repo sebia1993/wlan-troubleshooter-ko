@@ -1,3 +1,4 @@
+import struct
 import tempfile
 import threading
 import unittest
@@ -8,27 +9,32 @@ from wlan_troubleshooter_ko.app import self_check
 from wlan_troubleshooter_ko.ui.main_window import CaptureViewModel, MainWindow
 
 
-PCAP_HEADER = bytes.fromhex("d4c3b2a1") + bytes(20)
+def minimal_pcap():
+    return bytes.fromhex("d4c3b2a1") + struct.pack("<HHiIII", 2, 4, 0, 0, 65535, 1)
 
 
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "0-1")
+        self.assertEqual(result["phase"], "2A")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
+        self.assertIn("Link Type", result["analysis_features"])
 
     def test_view_model_does_not_need_tk_root(self):
         with tempfile.TemporaryDirectory() as directory:
             capture = Path(directory).resolve() / "synthetic.pcap"
-            capture.write_bytes(PCAP_HEADER)
+            capture.write_bytes(minimal_pcap())
             view_model = CaptureViewModel()
 
             state = view_model.select_capture(str(capture))
 
             self.assertTrue(state.valid)
-            self.assertIn("Phase 2", state.detail)
+            self.assertIn("캡처 유형 추정", state.detail)
+            self.assertIn("프로토콜별 장애 판정", state.detail)
             self.assertNotIn(str(capture), state.detail)
+            self.assertIsNotNone(view_model.structure)
+            self.assertIsNotNone(view_model.capabilities)
 
     @mock.patch("wlan_troubleshooter_ko.ui.main_window.validate_capture")
     def test_unexpected_file_error_is_safely_hidden(self, validate_mock):
