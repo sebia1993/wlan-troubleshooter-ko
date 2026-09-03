@@ -14,44 +14,76 @@ class FieldsOutputError(ValueError):
     """TShark fields 출력이 프로파일 또는 안전 제한과 다른 경우."""
 
 
-def _parse_quoted_tsv_line(line: str) -> Tuple[str, ...]:
-    """`quote=d`, 탭 구분 형식의 한 행을 추가 모듈 없이 읽는다."""
+def _append_checked(characters: List[str], character: str) -> None:
+    if character in "\r\n" or ord(character) == 0:
+        raise FieldsOutputError("TShark fields 셀에 허용되지 않은 문자가 있습니다.")
+    characters.append(character)
+    if len(characters) > _MAX_CELL_CHARACTERS:
+        raise FieldsOutputError("TShark fields 셀이 안전 제한을 벗어났습니다.")
+
+
+def _parse_quoted_cell(line: str, position: int) -> Tuple[str, int]:
+    characters: List[str] = []
+    position += 1
+    while position < len(line):
+        character = line[position]
+        if character == '"':
+            if position + 1 < len(line) and line[position + 1] == '"':
+                _append_checked(characters, '"')
+                position += 2
+                continue
+            return "".join(characters), position + 1
+        _append_checked(characters, character)
+        position += 1
+    raise FieldsOutputError("TShark fields 셀의 따옴표가 닫히지 않았습니다.")
+
+
+def _parse_unquoted_cell(line: str, position: int) -> Tuple[str, int]:
+    characters: List[str] = []
+    while position < len(line) and line[position] != "\t":
+        character = line[position]
+        if character == '"':
+            raise FieldsOutputError(
+                "따옴표 없는 TShark fields 셀 안에 이중 따옴표를 사용할 수 없습니다."
+            )
+        _append_checked(characters, character)
+        position += 1
+    return "".join(characters), position
+
+
+def _parse_tshark_tsv_line(line: str) -> Tuple[str, ...]:
+    """공식 TShark의 따옴표형·비따옴표형 탭 구분 행을 엄격히 읽는다.
+
+    Wireshark 버전과 필드 형식에 따라 ``-E quote=d``를 지정해도 헤더나
+    단순 값이 따옴표 없이 출력될 수 있다. 각 셀은 완전히 따옴표로 감싼
+    형식 또는 따옴표가 전혀 없는 형식만 허용하며 두 형식을 한 셀 안에서
+    섞는 것은 거부한다.
+    """
 
     if not line:
         return ()
     values: List[str] = []
     position = 0
     length = len(line)
-    while position < length:
-        if line[position] != '"':
-            raise FieldsOutputError("TShark fields 셀은 모두 이중 따옴표로 감싸야 합니다.")
-        position += 1
-        characters: List[str] = []
-        while position < length:
-            character = line[position]
-            if character == '"':
-                if position + 1 < length and line[position + 1] == '"':
-                    characters.append('"')
-                    position += 2
-                    continue
-                position += 1
-                break
-            if character in "\r\n" or ord(character) == 0:
-                raise FieldsOutputError("TShark fields 셀에 허용되지 않은 문자가 있습니다.")
-            characters.append(character)
-            if len(characters) > _MAX_CELL_CHARACTERS:
-                raise FieldsOutputError("TShark fields 셀이 안전 제한을 벗어났습니다.")
-            position += 1
+    while True:
+        if position < length and line[position] == '"':
+            value, position = _parse_quoted_cell(line, position)
+            if position < length and line[position] != "\t":
+                raise FieldsOutputError(
+                    "따옴표가 닫힌 TShark fields 셀 뒤에는 탭만 올 수 있습니다."
+                )
         else:
-            raise FieldsOutputError("TShark fields 셀의 따옴표가 닫히지 않았습니다.")
-        values.append("".join(characters))
+            value, position = _parse_unquoted_cell(line, position)
+        values.append(value)
+
         if position == length:
             break
         if line[position] != "\t":
             raise FieldsOutputError("TShark fields 셀 구분자가 탭이 아닙니다.")
         position += 1
         if position == length:
-            raise FieldsOutputError("TShark fields 행 끝에 빈 구분자가 있습니다.")
+            values.append("")
+            break
     return tuple(values)
 
 
@@ -71,7 +103,7 @@ def iter_fields_rows(
     if not lines:
         raise FieldsOutputError("TShark fields 헤더를 읽을 수 없습니다.")
     first_line = lines[0].lstrip("\ufeff")
-    header = _parse_quoted_tsv_line(first_line)
+    header = _parse_tshark_tsv_line(first_line)
     expected = profile.headers()
     if header != expected or len(header) != len(set(header)):
         raise FieldsOutputError("TShark fields 헤더가 승인 프로파일과 일치하지 않습니다.")
@@ -80,7 +112,7 @@ def iter_fields_rows(
     for raw_line in lines[1:]:
         if not raw_line:
             continue
-        row = _parse_quoted_tsv_line(raw_line)
+        row = _parse_tshark_tsv_line(raw_line)
         if not row or all(value == "" for value in row):
             continue
         rows += 1
