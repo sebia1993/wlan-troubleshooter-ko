@@ -18,10 +18,11 @@ function Get-LowerSha256 {
 function Copy-RequiredLicense {
     param(
         [Parameter(Mandatory = $true)][string]$Source,
-        [Parameter(Mandatory = $true)][string]$Destination
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][string]$Label
     )
-    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
-        throw "Required runtime license file is missing."
+    if ([string]::IsNullOrWhiteSpace($Source) -or -not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        throw "$Label license file is missing."
     }
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
@@ -56,6 +57,29 @@ function Find-TclTkLicense {
     throw "Bundled Tcl/Tk license terms are missing."
 }
 
+function Find-PyInstallerLicense {
+    param([Parameter(Mandatory = $true)][string]$PythonPath)
+
+    $Script = @'
+from importlib.metadata import distribution
+
+value = distribution("pyinstaller")
+candidates = []
+for entry in value.files or ():
+    lowered = entry.as_posix().casefold()
+    if lowered.endswith("/copying.txt") or lowered == "copying.txt":
+        candidates.append(entry.locate())
+if not candidates:
+    raise SystemExit(2)
+print(sorted(str(item) for item in candidates)[0])
+'@
+    $Result = (& $PythonPath -c $Script).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Result)) {
+        throw "Could not locate the PyInstaller distribution license."
+    }
+    return $Result
+}
+
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
 if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) {
     throw "Package output metadata is missing."
@@ -77,18 +101,15 @@ try {
 
     $PythonExecutable = (Get-Command $PythonPath -ErrorAction Stop).Source
     $PythonRoot = Split-Path -Parent $PythonExecutable
-    Copy-RequiredLicense -Source (Join-Path $PythonRoot "LICENSE.txt") -Destination (Join-Path $Licenses "PYTHON-LICENSE.txt")
+    Copy-RequiredLicense -Source (Join-Path $PythonRoot "LICENSE.txt") -Destination (Join-Path $Licenses "PYTHON-LICENSE.txt") -Label "Python"
 
     $TclLicense = Find-TclTkLicense -ExpandedRoot $Expanded -PythonRoot $PythonRoot -Component "tcl"
     $TkLicense = Find-TclTkLicense -ExpandedRoot $Expanded -PythonRoot $PythonRoot -Component "tk"
-    Copy-RequiredLicense -Source $TclLicense -Destination (Join-Path $Licenses "TCL-LICENSE.txt")
-    Copy-RequiredLicense -Source $TkLicense -Destination (Join-Path $Licenses "TK-LICENSE.txt")
+    Copy-RequiredLicense -Source $TclLicense -Destination (Join-Path $Licenses "TCL-LICENSE.txt") -Label "Tcl"
+    Copy-RequiredLicense -Source $TkLicense -Destination (Join-Path $Licenses "TK-LICENSE.txt") -Label "Tk"
 
-    $PyInstallerLicense = (& $PythonPath -c "from pathlib import Path; import PyInstaller; print(Path(PyInstaller.__file__).resolve().parent / 'COPYING.txt')").Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not locate the PyInstaller license."
-    }
-    Copy-RequiredLicense -Source $PyInstallerLicense -Destination (Join-Path $Licenses "PYINSTALLER-COPYING.txt")
+    $PyInstallerLicense = Find-PyInstallerLicense -PythonPath $PythonPath
+    Copy-RequiredLicense -Source $PyInstallerLicense -Destination (Join-Path $Licenses "PYINSTALLER-COPYING.txt") -Label "PyInstaller"
 
     $RequiredEntries = @(
         "WlanTroubleshooterKO.exe",
