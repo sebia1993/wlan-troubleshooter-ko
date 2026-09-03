@@ -26,6 +26,33 @@ function Copy-RequiredLicense {
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
+function Find-TclTkLicense {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExpandedRoot,
+        [Parameter(Mandatory = $true)][string]$PythonRoot,
+        [Parameter(Mandatory = $true)][ValidateSet("tcl", "tk")][string]$Component
+    )
+
+    $BundledDirectoryName = "_" + $Component + "_data"
+    $Bundled = Get-ChildItem -LiteralPath $ExpandedRoot -Recurse -File -Filter "license.terms" |
+        Where-Object { $_.Directory.Name -eq $BundledDirectoryName } |
+        Select-Object -First 1
+    if ($null -ne $Bundled) {
+        return $Bundled.FullName
+    }
+
+    $PythonTclRoot = Join-Path $PythonRoot "tcl"
+    if (Test-Path -LiteralPath $PythonTclRoot -PathType Container) {
+        $Installed = Get-ChildItem -LiteralPath $PythonTclRoot -Recurse -File -Filter "license.terms" |
+            Where-Object { $_.Directory.Name -like ($Component + "*") } |
+            Select-Object -First 1
+        if ($null -ne $Installed) {
+            return $Installed.FullName
+        }
+    }
+    throw "Bundled Tcl/Tk license terms are missing."
+}
+
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
 if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) {
     throw "Package output metadata is missing."
@@ -49,17 +76,10 @@ try {
     $PythonRoot = Split-Path -Parent $PythonExecutable
     Copy-RequiredLicense -Source (Join-Path $PythonRoot "LICENSE.txt") -Destination (Join-Path $Licenses "PYTHON-LICENSE.txt")
 
-    $TclLicense = Get-ChildItem -LiteralPath (Join-Path $PythonRoot "tcl") -Recurse -File -Filter "license.terms" |
-        Where-Object { $_.Directory.Name -like "tcl*" } |
-        Select-Object -First 1
-    $TkLicense = Get-ChildItem -LiteralPath (Join-Path $PythonRoot "tcl") -Recurse -File -Filter "license.terms" |
-        Where-Object { $_.Directory.Name -like "tk*" } |
-        Select-Object -First 1
-    if ($null -eq $TclLicense -or $null -eq $TkLicense) {
-        throw "Bundled Tcl/Tk license terms are missing."
-    }
-    Copy-RequiredLicense -Source $TclLicense.FullName -Destination (Join-Path $Licenses "TCL-LICENSE.txt")
-    Copy-RequiredLicense -Source $TkLicense.FullName -Destination (Join-Path $Licenses "TK-LICENSE.txt")
+    $TclLicense = Find-TclTkLicense -ExpandedRoot $Expanded -PythonRoot $PythonRoot -Component "tcl"
+    $TkLicense = Find-TclTkLicense -ExpandedRoot $Expanded -PythonRoot $PythonRoot -Component "tk"
+    Copy-RequiredLicense -Source $TclLicense -Destination (Join-Path $Licenses "TCL-LICENSE.txt")
+    Copy-RequiredLicense -Source $TkLicense -Destination (Join-Path $Licenses "TK-LICENSE.txt")
 
     $PyInstallerLicense = (& $PythonPath -c "from pathlib import Path; import PyInstaller; print(Path(PyInstaller.__file__).resolve().parent / 'COPYING.txt')").Trim()
     if ($LASTEXITCODE -ne 0) {
