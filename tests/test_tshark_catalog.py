@@ -67,12 +67,23 @@ class TSharkCatalogTests(unittest.TestCase):
                 "protocol-inventory",
             )
 
-    def test_catalog_rejects_conflicting_duplicate_and_unknown_record(self):
-        with self.assertRaises(FieldCatalogError):
-            parse_field_catalog(
-                CATALOG_LINES
-                + ["F\tDifferent\tframe.number\tFT_STRING\tframe\t\t0x0\t\n"]
-            )
+    def test_catalog_normalizes_reused_abbreviations_and_rejects_unknown_record(self):
+        aliases = CATALOG_LINES + [
+            "P\tAlternate Frame Description\tframe\n",
+            "F\tAlternate Frame Number\tframe.number\tFT_STRING\tframe\t\t0x0\t\n",
+        ]
+        forward = parse_field_catalog(aliases)
+        reverse = parse_field_catalog(reversed(aliases))
+
+        self.assertEqual(forward.protocols, reverse.protocols)
+        self.assertEqual(forward.fields, reverse.fields)
+        self.assertEqual(
+            [item.abbreviation for item in forward.protocols].count("frame"),
+            1,
+        )
+        self.assertEqual(forward.field_names().count("frame.number"), 1)
+        self.assertTrue(forward.has_field("frame.number"))
+
         with self.assertRaises(FieldCatalogError):
             parse_field_catalog(CATALOG_LINES + ["X\tunknown\n"])
 
