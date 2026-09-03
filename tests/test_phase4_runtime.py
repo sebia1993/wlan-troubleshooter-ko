@@ -19,6 +19,7 @@ from wlan_troubleshooter_ko.tshark.runner import TSharkExecutionError
 
 CATALOG_TEXT = """P\tFrame\tframe
 F\tFrame Number\tframe.number\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
+F\tEpoch time\tframe.time_epoch\tFT_RELATIVE_TIME\tframe\t\t0x0\t
 F\tInterface id\tframe.interface_id\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
 F\tCapture Length\tframe.cap_len\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
 F\tFrame Length\tframe.len\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
@@ -27,6 +28,10 @@ F\tProtocols in frame\tframe.protocols\tFT_STRING\tframe\t\t0x0\t
 FIELDS_TEXT = """"frame.number"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"
 "1"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
 "2"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
+"""
+EVENT_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"
+"1"\t"1.000000000"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
+"2"\t"2.000000000"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
 """
 
 
@@ -193,11 +198,11 @@ class Phase4RuntimeTests(unittest.TestCase):
         )
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
-    def test_service_returns_identifier_free_inventory(self, popen):
+    def test_service_returns_identifier_free_inventory_and_stage_summary(self, popen):
         root, vendor, capture, _workspace = self.setup_paths()
         popen.side_effect = [
             FakeProcess(CATALOG_TEXT.encode("utf-8")),
-            FakeProcess(FIELDS_TEXT.encode("utf-8")),
+            FakeProcess(EVENT_FIELDS_TEXT.encode("utf-8")),
         ]
 
         result = analyze_capture(
@@ -210,12 +215,17 @@ class Phase4RuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.inventory_state, "completed")
         self.assertIsNotNone(result.protocol_inventory)
+        self.assertIsNotNone(result.protocol_inventory.event_correlation)
         text = json.dumps(serialized, ensure_ascii=False)
         self.assertNotIn(str(capture), text)
         self.assertNotIn(capture.name, text)
         self.assertNotIn("192.0.2", text)
         self.assertEqual(
             serialized["protocol_inventory"]["inventory"]["frames_observed"],
+            2,
+        )
+        self.assertEqual(
+            serialized["protocol_inventory"]["event_correlation"]["frames_scanned"],
             2,
         )
 
