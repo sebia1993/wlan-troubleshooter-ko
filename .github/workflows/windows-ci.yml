@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  phase-0-2a-validation:
-    name: Phase 0-2A offline validation
+  phase-0-2b-validation:
+    name: Phase 0-2B offline validation
     runs-on: windows-latest
     timeout-minutes: 20
     env:

@@ -1,4 +1,4 @@
-"""로컬 캡처 검증과 Phase 2A 구조 사전 점검 화면."""
+"""로컬 캡처 사전 점검과 Phase 2B 준비 상태 화면."""
 
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ from wlan_troubleshooter_ko.core.capture import (
     CaptureValidationError,
     validate_capture,
 )
-from wlan_troubleshooter_ko.tshark.status import inspect_bundle
+from wlan_troubleshooter_ko.tshark.profiles import FieldProfileError, load_field_profiles
+from wlan_troubleshooter_ko.tshark.status import BundleStatus, inspect_bundle
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,23 @@ def _compact(items: Tuple[str, ...], limit: int = 3) -> str:
     if len(items) > limit:
         visible.append("외 {0}개".format(len(items) - limit))
     return " · ".join(visible)
+
+
+def _phase2b_status(bundle_status: BundleStatus) -> str:
+    resources = Path(__file__).resolve().parents[1] / "resources"
+    try:
+        registry = load_field_profiles(resources / "tshark" / "field-profiles.v1.json")
+        profile = registry.get_profile("protocol-inventory")
+    except FieldProfileError:
+        return "Phase 2B 프로파일 오류 · 프로토콜 인벤토리를 준비할 수 없습니다."
+    base = "Phase 2B 프로파일 {0} · 승인 필드 {1}개 · 프로토콜 그룹 {2}개".format(
+        registry.profile_version,
+        len(profile.fields),
+        len(registry.protocol_groups),
+    )
+    if bundle_status.code == "integrity_verified":
+        return base + " · TShark 필드 호환성 실행 검증 필요"
+    return base + " · 실행 비활성 · 승인 Portable TShark 대기"
 
 
 def format_preflight_detail(
@@ -57,7 +75,8 @@ def format_preflight_detail(
         "형식상 확인 가능: {available}\n"
         "현재 확인 불가: {unavailable}\n"
         "주의: {cautions}\n"
-        "프로토콜별 장애 판정은 승인된 Portable TShark가 준비된 다음 단계에서 수행합니다."
+        "Phase 2B는 프로토콜 존재 인벤토리의 고정 필드·파서·정규화 기반까지 준비됐습니다. "
+        "승인 TShark가 제공되기 전에는 실제 인벤토리를 실행하지 않습니다."
     ).format(
         format_name=capture.capture_format.upper(),
         size=capture.size_bytes,
@@ -96,20 +115,13 @@ class CaptureViewModel:
             capture = validate_capture(path, cancel_event=cancel_event)
             if cancel_event is not None and cancel_event.is_set():
                 raise CaptureValidationError("파일 확인이 취소됐습니다.")
-            structure = inspect_capture_structure(
-                capture,
-                cancel_event=cancel_event,
-            )
+            structure = inspect_capture_structure(capture, cancel_event=cancel_event)
             capabilities = classify_capture_capabilities(structure)
         except (CaptureValidationError, CaptureStructureError) as exc:
             self.capture = None
             self.structure = None
             self.capabilities = None
-            self.state = CaptureViewState(
-                "파일을 사용할 수 없습니다.",
-                str(exc),
-                False,
-            )
+            self.state = CaptureViewState("파일을 사용할 수 없습니다.", str(exc), False)
             return self.state
         except Exception:
             self.capture = None
@@ -139,8 +151,10 @@ class MainWindow:
         self._view_model = CaptureViewModel()
         self._status = tk.StringVar(value=self._view_model.state.status)
         self._detail = tk.StringVar(value=self._view_model.state.detail)
-        vendor_root = Path(__file__).resolve().parents[3] / "vendor" / "wireshark"
-        self._tshark_status = tk.StringVar(value=inspect_bundle(vendor_root).message)
+        self._vendor_root = Path(__file__).resolve().parents[3] / "vendor" / "wireshark"
+        bundle_status = inspect_bundle(self._vendor_root)
+        self._tshark_status = tk.StringVar(value=bundle_status.message)
+        self._phase2b_status = tk.StringVar(value=_phase2b_status(bundle_status))
         self._selection_generation = 0
         self._validation_cancel = threading.Event()
         self._closed = False
@@ -149,7 +163,7 @@ class MainWindow:
 
     def _build(self) -> None:
         self._root.title("WLAN 장애 분석기 KO")
-        self._root.minsize(760, 520)
+        self._root.minsize(780, 570)
 
         frame = ttk.Frame(self._root, padding=24)
         frame.pack(fill="both", expand=True)
@@ -162,7 +176,7 @@ class MainWindow:
         ).pack(anchor="w", pady=(12, 4))
         ttk.Label(
             frame,
-            text="초급 네트워크 엔지니어를 위한 Phase 2A 캡처 사전 점검",
+            text="초급 네트워크 엔지니어를 위한 Phase 2B 기반 프리뷰",
         ).pack(anchor="w")
 
         ttk.Separator(frame).pack(fill="x", pady=20)
@@ -179,7 +193,7 @@ class MainWindow:
         ttk.Label(
             frame,
             textvariable=self._detail,
-            wraplength=700,
+            wraplength=720,
             justify="left",
         ).pack(anchor="w")
 
@@ -191,11 +205,13 @@ class MainWindow:
         ttk.Label(frame, textvariable=self._tshark_status).pack(anchor="w", pady=(6, 0))
         ttk.Label(
             frame,
-            text=(
-                "현재 버전은 캡처 유형과 분석 가능 범위를 점검하며 "
-                "실제 장애 판정은 아직 지원하지 않습니다."
-            ),
-            wraplength=700,
+            textvariable=self._phase2b_status,
+            wraplength=720,
+        ).pack(anchor="w", pady=(3, 0))
+        ttk.Label(
+            frame,
+            text="프로토콜 존재는 접속 성공이나 장애 원인을 뜻하지 않으며 실제 장애 판정은 아직 지원하지 않습니다.",
+            wraplength=720,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Button(frame, text="종료", command=self._close).pack(anchor="e", pady=(18, 0))
 
@@ -217,10 +233,7 @@ class MainWindow:
 
         def validate_in_background() -> None:
             worker_view_model = CaptureViewModel()
-            state = worker_view_model.select_capture(
-                selected,
-                cancel_event=cancel_event,
-            )
+            state = worker_view_model.select_capture(selected, cancel_event=cancel_event)
 
             def apply_result() -> None:
                 if generation != self._selection_generation:
