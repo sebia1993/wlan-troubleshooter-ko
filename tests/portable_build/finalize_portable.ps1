@@ -33,9 +33,10 @@ function Find-TclTkLicense {
         [Parameter(Mandatory = $true)][ValidateSet("tcl", "tk")][string]$Component
     )
 
-    $BundledDirectoryName = "_" + $Component + "_data"
+    $BundledSegment = [System.IO.Path]::DirectorySeparatorChar + "_" + $Component + "_data" + [System.IO.Path]::DirectorySeparatorChar
     $Bundled = Get-ChildItem -LiteralPath $ExpandedRoot -Recurse -File -Filter "license.terms" |
-        Where-Object { $_.Directory.Name -eq $BundledDirectoryName } |
+        Where-Object { $_.FullName.Contains($BundledSegment, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Sort-Object FullName |
         Select-Object -First 1
     if ($null -ne $Bundled) {
         return $Bundled.FullName
@@ -43,8 +44,10 @@ function Find-TclTkLicense {
 
     $PythonTclRoot = Join-Path $PythonRoot "tcl"
     if (Test-Path -LiteralPath $PythonTclRoot -PathType Container) {
+        $InstalledSegment = [System.IO.Path]::DirectorySeparatorChar + $Component
         $Installed = Get-ChildItem -LiteralPath $PythonTclRoot -Recurse -File -Filter "license.terms" |
-            Where-Object { $_.Directory.Name -like ($Component + "*") } |
+            Where-Object { $_.FullName.Contains($InstalledSegment, [System.StringComparison]::OrdinalIgnoreCase) } |
+            Sort-Object FullName |
             Select-Object -First 1
         if ($null -ne $Installed) {
             return $Installed.FullName
