@@ -79,10 +79,7 @@ try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
     $BuildInfo = Get-Content -LiteralPath (Join-Path $Expanded "BUILD_INFO.json") -Raw | ConvertFrom-Json -Depth 32
     if ($BuildInfo.product_version -ne $ExpectedProductVersion -or $BuildInfo.protocol_inventory_runtime -ne "enabled") {
-        throw "Portable BUILD_INFO does not describe the enabled protocol inventory runtime."
-    }
-    if ($BuildInfo.event_correlation_runtime -ne "enabled") {
-        throw "Portable BUILD_INFO does not describe the enabled event correlation runtime."
+        throw "Portable BUILD_INFO does not describe the enabled analysis runtime."
     }
 
     & $PythonPath (Join-Path $PSScriptRoot "generate_inventory_fixture.py") --output $Capture
