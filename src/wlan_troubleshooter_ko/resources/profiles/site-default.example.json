@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "profile_version": "1.0.0-phase1",
+  "profile_id": "SYNTHETIC-EXAMPLE",
+  "display_name": "문서용 예시 사이트",
+  "synthetic": true,
+  "radius_servers": [],
+  "dhcp_servers": [],
+  "dns_servers": [],
+  "vlans": []
+}

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+build/
+dist/
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
+# Captures and packet-analysis artifacts (never commit real captures)
+*.[Pp][Cc][Aa][Pp]
+*.[Pp][Cc][Aa][Pp][Nn][Gg]
+*.[Cc][Aa][Pp]
+*.[Ee][Tt][Ll]
+*.[Pp][Cc][Aa][Pp].[Gg][Zz]
+*.[Pp][Cc][Aa][Pp][Nn][Gg].[Gg][Zz]
+**/captures/
+**/pcaps/
+
+# Local or company-specific configuration
+profiles/local/
+**/profiles/local/
+**/profiles/*.json
+!**/profiles/*.example.json
+*.local.json
+*.private.json
+*.secret.json
+.env
+.env.*
+
+# Generated local data
+reports/
+logs/
+extracted/
+work/
+tmp/
+.analysis/
+
+# Portable Wireshark is supplied only through the approved internal process.
+vendor/wireshark/*
+!vendor/wireshark/README.md
+!vendor/wireshark/manifest.example.json
