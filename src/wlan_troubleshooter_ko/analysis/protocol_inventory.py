@@ -59,9 +59,7 @@ class ProtocolInventory:
         }
 
 
-def _parse_uint(value: str, label: str, *, allow_empty: bool = False) -> Optional[int]:
-    if allow_empty and value == "":
-        return None
+def _parse_uint(value: str, label: str) -> int:
     if not value or not value.isascii() or not value.isdecimal():
         raise ProtocolInventoryError(label + " 값이 음이 아닌 정수가 아닙니다.")
     parsed = int(value, 10)
@@ -104,19 +102,16 @@ def build_protocol_inventory(
     try:
         rows = iter_fields_rows(text, profile)
         for row in rows:
-            frame_number_value = _parse_uint(row[positions["frame_number"]], "프레임 번호")
-            captured_length_value = _parse_uint(row[positions["captured_length"]], "캡처 길이")
-            frame_length_value = _parse_uint(row[positions["frame_length"]], "프레임 길이")
-            assert frame_number_value is not None
-            assert captured_length_value is not None
-            assert frame_length_value is not None
-            if frame_number_value <= previous_frame or frame_number_value == 0:
+            frame_number = _parse_uint(row[positions["frame_number"]], "프레임 번호")
+            captured_length = _parse_uint(row[positions["captured_length"]], "캡처 길이")
+            frame_length = _parse_uint(row[positions["frame_length"]], "프레임 길이")
+            if frame_number <= previous_frame or frame_number == 0:
                 raise ProtocolInventoryError("프레임 번호가 엄격한 증가 순서가 아닙니다.")
-            if captured_length_value > frame_length_value:
+            if captured_length > frame_length:
                 raise ProtocolInventoryError("캡처 길이가 프레임 길이보다 큽니다.")
-            previous_frame = frame_number_value
+            previous_frame = frame_number
             frames_observed += 1
-            truncated += int(captured_length_value < frame_length_value)
+            truncated += int(captured_length < frame_length)
 
             tokens = {
                 token.strip().casefold()
@@ -127,8 +122,8 @@ def build_protocol_inventory(
             for index in seen_groups:
                 counters[index] += 1
                 if first_frames[index] is None:
-                    first_frames[index] = frame_number_value
-                last_frames[index] = frame_number_value
+                    first_frames[index] = frame_number
+                last_frames[index] = frame_number
     except FieldsOutputError as exc:
         raise ProtocolInventoryError(str(exc)) from exc
 
@@ -157,7 +152,9 @@ def build_protocol_inventory(
     elif frames_observed < expected_frames:
         cautions.append("프로파일 패킷 상한 또는 TShark 처리 결과 때문에 일부 프레임만 관찰됐습니다.")
     if not_observed:
-        cautions.append("관찰되지 않은 프로토콜은 캡처 위치·시간·방향 때문에 누락됐을 수 있습니다.")
+        cautions.append(
+            "관찰되지 않은 프로토콜은 캡처 위치·시간·방향 때문에 누락됐을 수 있으며 장애 증거가 아닙니다."
+        )
     if truncated:
         cautions.append("잘린 프레임이 있어 상위 프로토콜 식별이 불완전할 수 있습니다.")
     if profile.missing_optional_fields:
