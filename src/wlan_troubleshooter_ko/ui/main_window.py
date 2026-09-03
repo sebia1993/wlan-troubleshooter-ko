@@ -76,7 +76,7 @@ def format_preflight_detail(
         "현재 확인 불가: {unavailable}\n"
         "주의: {cautions}\n"
         "현재 화면은 캡처 구조와 분석 가능 범위를 점검합니다. "
-        "내장 TShark를 이용한 실제 프로토콜 인벤토리와 장애 판정 화면은 후속 단계에서 연결됩니다."
+        "내장 TShark를 이용한 실제 프로토콜 존재 인벤토리와 장애 판정 화면은 후속 단계에서 연결됩니다."
     ).format(
         format_name=capture.capture_format.upper(),
         size=capture.size_bytes,
