@@ -16,9 +16,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$ConfigurationPath = Join-Path $PSScriptRoot "supply-chain.json"
-$Configuration = Get-Content -LiteralPath $ConfigurationPath -Raw | ConvertFrom-Json -Depth 32
-
+$Configuration = Get-Content -LiteralPath (Join-Path $PSScriptRoot "supply-chain.json") -Raw | ConvertFrom-Json -Depth 32
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $env:RUNNER_TEMP "wlan-troubleshooter-portable"
 }
@@ -40,29 +38,29 @@ function Get-LowerSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-function Get-VerifiedDownload {
+function Get-OfficialFile {
     param(
         [Parameter(Mandatory = $true)]$Component,
         [Parameter(Mandatory = $true)][string]$Destination
     )
     if ($Component.url -notlike "https://www.wireshark.org/download/*") {
-        throw "Only the pinned official Wireshark download host is allowed."
+        throw "Only the pinned official Wireshark host is allowed."
     }
     Invoke-WebRequest -Uri $Component.url -OutFile $Destination -MaximumRedirection 10
     if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
-        throw "Pinned download did not create a regular file."
+        throw "Official download did not create a regular file."
     }
     return Get-LowerSha256 -Path $Destination
 }
 
-function Assert-PinnedHash {
+function Assert-Hash {
     param(
         [Parameter(Mandatory = $true)][string]$Observed,
         [Parameter(Mandatory = $true)][string]$Expected,
         [Parameter(Mandatory = $true)][string]$Label
     )
     if ($Expected -eq "DISCOVER") {
-        throw "$Label SHA-256 is not pinned. Run discovery first."
+        throw "$Label SHA-256 is not pinned."
     }
     if ($Observed -ne $Expected.ToLowerInvariant()) {
         throw "$Label SHA-256 mismatch."
@@ -76,12 +74,52 @@ function Assert-WiresharkSignature {
     )
     $Signature = Get-AuthenticodeSignature -LiteralPath $Path
     if ($Signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-        throw "Wireshark Authenticode signature is not valid: $($Signature.Status)"
+        throw "Wireshark Authenticode signature is invalid: $($Signature.Status)"
     }
     if ($null -eq $Signature.SignerCertificate -or $Signature.SignerCertificate.Subject -notlike "*$SubjectContains*") {
         throw "Wireshark Authenticode signer does not match the pinned subject."
     }
     return $Signature.SignerCertificate.Subject
+}
+
+function Remove-UnsafeVendorContent {
+    param([Parameter(Mandatory = $true)][string]$VendorRoot)
+
+    Get-ChildItem -LiteralPath $VendorRoot -Recurse -File -Filter "*.exe" |
+        Where-Object { $_.Name -ne "tshark.exe" } |
+        Remove-Item -Force
+    Get-ChildItem -LiteralPath $VendorRoot -Recurse -File |
+        Where-Object { $_.Extension -in @(".pdb", ".msi", ".msix", ".chm") } |
+        Remove-Item -Force
+    Get-ChildItem -LiteralPath $VendorRoot -Recurse -Directory |
+        Where-Object { $_.Name -in @("extcap", "Npcap", "npcap", "plugins") } |
+        Sort-Object { $_.FullName.Length } -Descending |
+        Remove-Item -Recurse -Force
+
+    Get-ChildItem -LiteralPath $VendorRoot -Recurse -File | ForEach-Object {
+        $Relative = [System.IO.Path]::GetRelativePath($VendorRoot, $_.FullName).Replace("\", "/")
+        if ($Relative -notmatch "^[A-Za-z0-9._/-]+$") {
+            Remove-Item -LiteralPath $_.FullName -Force
+        }
+    }
+    Get-ChildItem -LiteralPath $VendorRoot -Recurse -Directory |
+        Sort-Object { $_.FullName.Length } -Descending |
+        ForEach-Object {
+            $Relative = [System.IO.Path]::GetRelativePath($VendorRoot, $_.FullName).Replace("\", "/")
+            if ($Relative -notmatch "^[A-Za-z0-9._/-]+$") {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force
+            }
+        }
+}
+
+function Restore-EnvironmentValue {
+    param([Parameter(Mandatory = $true)][string]$Name, [AllowNull()][string]$Value)
+    if ($null -eq $Value) {
+        Remove-Item ("Env:" + $Name) -ErrorAction SilentlyContinue
+    }
+    else {
+        [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
+    }
 }
 
 New-CleanDirectory -Path $OutputDirectory
@@ -91,8 +129,8 @@ New-Item -ItemType Directory -Path $DownloadRoot | Out-Null
 try {
     $MsiPath = Join-Path $DownloadRoot $Configuration.wireshark.msi.filename
     $SourcePath = Join-Path $DownloadRoot $Configuration.wireshark.source.filename
-    $MsiHash = Get-VerifiedDownload -Component $Configuration.wireshark.msi -Destination $MsiPath
-    $SourceHash = Get-VerifiedDownload -Component $Configuration.wireshark.source -Destination $SourcePath
+    $MsiHash = Get-OfficialFile -Component $Configuration.wireshark.msi -Destination $MsiPath
+    $SourceHash = Get-OfficialFile -Component $Configuration.wireshark.source -Destination $SourcePath
     $MsiSigner = Assert-WiresharkSignature -Path $MsiPath -SubjectContains $Configuration.wireshark.msi.signer_subject_contains
 
     $Observed = [ordered]@{
@@ -109,13 +147,12 @@ try {
     Write-Host "Observed Wireshark MSI SHA-256: $MsiHash"
     Write-Host "Observed Wireshark source SHA-256: $SourceHash"
     Write-Host "Observed Wireshark signer: $MsiSigner"
-
     if ($Mode -eq "Discover") {
         return
     }
 
-    Assert-PinnedHash -Observed $MsiHash -Expected $Configuration.wireshark.msi.sha256 -Label "Wireshark MSI"
-    Assert-PinnedHash -Observed $SourceHash -Expected $Configuration.wireshark.source.sha256 -Label "Wireshark source"
+    Assert-Hash -Observed $MsiHash -Expected $Configuration.wireshark.msi.sha256 -Label "Wireshark MSI"
+    Assert-Hash -Observed $SourceHash -Expected $Configuration.wireshark.source.sha256 -Label "Wireshark source"
 
     $PyInstallerVersion = (& $PythonPath -m PyInstaller --version).Trim()
     if ($LASTEXITCODE -ne 0 -or $PyInstallerVersion -ne $Configuration.pyinstaller_version) {
@@ -126,9 +163,8 @@ try {
     $MsiArguments = "/a `"$MsiPath`" /qn TARGETDIR=`"$ExtractRoot`""
     $MsiProcess = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\msiexec.exe") -ArgumentList $MsiArguments -Wait -PassThru
     if ($MsiProcess.ExitCode -ne 0) {
-        throw "Wireshark MSI administrative extraction failed with exit code $($MsiProcess.ExitCode)."
+        throw "Wireshark MSI extraction failed with exit code $($MsiProcess.ExitCode)."
     }
-
     $TSharkCandidates = @(Get-ChildItem -LiteralPath $ExtractRoot -Recurse -File -Filter "tshark.exe")
     if ($TSharkCandidates.Count -ne 1) {
         throw "Exactly one extracted tshark.exe is required. Observed: $($TSharkCandidates.Count)"
@@ -138,55 +174,39 @@ try {
 
     New-Item -ItemType Directory -Path $PyInstallerRoot | Out-Null
     $PyInstallerDist = Join-Path $PyInstallerRoot "dist"
-    $PyInstallerWork = Join-Path $PyInstallerRoot "work"
-    $PyInstallerSpec = Join-Path $PyInstallerRoot "spec"
     $EntryPoint = Join-Path $RepositoryRoot "src\wlan_troubleshooter_ko\__main__.py"
     $Resources = Join-Path $RepositoryRoot "src\wlan_troubleshooter_ko\resources"
-    $AddData = "$Resources;wlan_troubleshooter_ko\resources"
-    $SourceRoot = Join-Path $RepositoryRoot "src"
     $PyInstallerArguments = @(
         "-m", "PyInstaller",
-        "--noconfirm",
-        "--clean",
-        "--onedir",
-        "--windowed",
+        "--noconfirm", "--clean", "--onedir", "--windowed",
         "--name", "WlanTroubleshooterKO",
         "--distpath", $PyInstallerDist,
-        "--workpath", $PyInstallerWork,
-        "--specpath", $PyInstallerSpec,
-        "--paths", $SourceRoot,
-        "--add-data", $AddData,
+        "--workpath", (Join-Path $PyInstallerRoot "work"),
+        "--specpath", (Join-Path $PyInstallerRoot "spec"),
+        "--paths", (Join-Path $RepositoryRoot "src"),
+        "--add-data", ($Resources + ";wlan_troubleshooter_ko\resources"),
         $EntryPoint
     )
     & $PythonPath @PyInstallerArguments
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller build failed."
     }
-
     $BuiltApplication = Join-Path $PyInstallerDist "WlanTroubleshooterKO"
     if (-not (Test-Path -LiteralPath (Join-Path $BuiltApplication "WlanTroubleshooterKO.exe") -PathType Leaf)) {
         throw "PyInstaller did not create the expected executable."
     }
+
     New-Item -ItemType Directory -Path $StageRoot | Out-Null
-    Copy-Item -LiteralPath (Join-Path $BuiltApplication "*") -Destination $StageRoot -Recurse -Force
+    Get-ChildItem -LiteralPath $BuiltApplication -Force | Copy-Item -Destination $StageRoot -Recurse -Force
 
     $VendorRoot = Join-Path $StageRoot "vendor\wireshark"
     New-Item -ItemType Directory -Path $VendorRoot -Force | Out-Null
     Get-ChildItem -LiteralPath $WiresharkInstallRoot -Force | Copy-Item -Destination $VendorRoot -Recurse -Force
-
-    Get-ChildItem -LiteralPath $VendorRoot -Recurse -File -Filter "*.exe" |
-        Where-Object { $_.Name -ne "tshark.exe" } |
-        Remove-Item -Force
-    Get-ChildItem -LiteralPath $VendorRoot -Recurse -File -Include "*.pdb", "*.msi", "*.msix" |
-        Remove-Item -Force
-    Get-ChildItem -LiteralPath $VendorRoot -Recurse -Directory |
-        Where-Object { $_.Name -in @("extcap", "Npcap", "npcap") } |
-        Sort-Object { $_.FullName.Length } -Descending |
-        Remove-Item -Recurse -Force
+    Remove-UnsafeVendorContent -VendorRoot $VendorRoot
 
     $CopyingPath = Join-Path $VendorRoot "COPYING"
     if (-not (Test-Path -LiteralPath $CopyingPath -PathType Leaf)) {
-        $CopyingCandidate = Get-ChildItem -LiteralPath $VendorRoot -File -Filter "COPYING*" | Select-Object -First 1
+        $CopyingCandidate = Get-ChildItem -LiteralPath $VendorRoot -File | Where-Object { $_.Name -like "COPYING*" } | Select-Object -First 1
         if ($null -ne $CopyingCandidate) {
             Copy-Item -LiteralPath $CopyingCandidate.FullName -Destination $CopyingPath
         }
@@ -201,15 +221,8 @@ try {
         }
     }
 
-    @(
-        "README.md",
-        "LICENSE",
-        "THIRD_PARTY_NOTICES.md",
-        "CHANGELOG.md",
-        "RELEASE_NOTES.md",
-        "IMPLEMENTATION_STATUS.md"
-    ) | ForEach-Object {
-        Copy-Item -LiteralPath (Join-Path $RepositoryRoot $_) -Destination $StageRoot
+    foreach ($Name in @("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md", "RELEASE_NOTES.md", "IMPLEMENTATION_STATUS.md")) {
+        Copy-Item -LiteralPath (Join-Path $RepositoryRoot $Name) -Destination $StageRoot
     }
 
     $ApprovalReference = "PROJECT-PINNED-WIRESHARK-" + $Configuration.wireshark.version
@@ -218,10 +231,12 @@ try {
         throw "TShark runtime manifest generation failed."
     }
 
+    $GitCommit = [Environment]::GetEnvironmentVariable("GITHUB_SHA", "Process")
+    if ([string]::IsNullOrWhiteSpace($GitCommit)) { $GitCommit = "local" }
     $BuildInfo = [ordered]@{
         schema_version = 1
         product_version = "0.3.0-alpha.1"
-        git_commit = $env:GITHUB_SHA
+        git_commit = $GitCommit
         python_build_version = (& $PythonPath --version 2>&1).ToString().Trim()
         pyinstaller_version = $PyInstallerVersion
         wireshark_version = $Configuration.wireshark.version
@@ -233,40 +248,42 @@ try {
     }
     $BuildInfo | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StageRoot "BUILD_INFO.json") -Encoding utf8
 
-    $OldPythonPath = $env:PYTHONPATH
-    $OldPythonHome = $env:PYTHONHOME
     $OldPath = $env:PATH
+    $OldPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+    $OldPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
     try {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
         Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
         $env:PATH = (Join-Path $env:SystemRoot "System32") + ";" + $env:SystemRoot
         $SelfCheckPath = Join-Path $WorkRoot "portable-self-check.json"
-        $ApplicationPath = Join-Path $StageRoot "WlanTroubleshooterKO.exe"
-        $SelfCheckProcess = Start-Process -FilePath $ApplicationPath -ArgumentList ("--self-check-output=" + $SelfCheckPath) -Wait -PassThru
+        $SelfCheckProcess = Start-Process -FilePath (Join-Path $StageRoot "WlanTroubleshooterKO.exe") -ArgumentList ("--self-check-output=" + $SelfCheckPath) -Wait -PassThru
         if ($SelfCheckProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $SelfCheckPath -PathType Leaf)) {
             throw "Portable executable self-check failed without external Python."
         }
         $SelfCheck = Get-Content -LiteralPath $SelfCheckPath -Raw | ConvertFrom-Json
-        if ($SelfCheck.python_external_required -ne "false" -or $SelfCheck.portable_tshark -notlike "무결성 검증됨:*") {
-            throw "Portable executable self-check did not confirm the bundled runtimes."
+        if ($SelfCheck.python_external_required -ne "false" -or $SelfCheck.tshark_external_required -ne "false") {
+            throw "Portable executable did not confirm bundled runtimes."
+        }
+        if ($SelfCheck.portable_tshark -notlike "무결성 검증됨:*") {
+            throw "Portable executable did not verify the TShark manifest."
         }
     }
     finally {
         $env:PATH = $OldPath
-        if ($null -eq $OldPythonPath) { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue } else { $env:PYTHONPATH = $OldPythonPath }
-        if ($null -eq $OldPythonHome) { Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue } else { $env:PYTHONHOME = $OldPythonHome }
+        Restore-EnvironmentValue -Name "PYTHONPATH" -Value $OldPythonPath
+        Restore-EnvironmentValue -Name "PYTHONHOME" -Value $OldPythonHome
     }
 
     $SmokeRoot = Join-Path $WorkRoot "tshark-smoke"
     New-Item -ItemType Directory -Path $SmokeRoot | Out-Null
-    foreach ($Name in @("config", "plugins", "extcap", "data", "temp")) {
-        New-Item -ItemType Directory -Path (Join-Path $SmokeRoot $Name) | Out-Null
-    }
-    $OldEnvironment = @{}
+    $Saved = @{}
     foreach ($Name in @("WIRESHARK_CONFIG_DIR", "WIRESHARK_PLUGIN_DIR", "WIRESHARK_EXTCAP_DIR", "WIRESHARK_DATA_DIR", "TEMP", "TMP", "TMPDIR")) {
-        $OldEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+        $Saved[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
     }
     try {
+        foreach ($Name in @("config", "plugins", "extcap", "data", "temp")) {
+            New-Item -ItemType Directory -Path (Join-Path $SmokeRoot $Name) | Out-Null
+        }
         $env:WIRESHARK_CONFIG_DIR = Join-Path $SmokeRoot "config"
         $env:WIRESHARK_PLUGIN_DIR = Join-Path $SmokeRoot "plugins"
         $env:WIRESHARK_EXTCAP_DIR = Join-Path $SmokeRoot "extcap"
@@ -281,9 +298,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Bundled TShark field catalog smoke test failed." }
     }
     finally {
-        foreach ($Name in $OldEnvironment.Keys) {
-            [Environment]::SetEnvironmentVariable($Name, $OldEnvironment[$Name], "Process")
-        }
+        foreach ($Name in $Saved.Keys) { Restore-EnvironmentValue -Name $Name -Value $Saved[$Name] }
     }
 
     $ArchiveName = "WlanTroubleshooterKO-v0.3.0-alpha.1-win64-portable.zip"
@@ -293,16 +308,17 @@ try {
     $ArchiveChecksumPath = $ArchivePath + ".sha256"
     "$ArchiveHash  $ArchiveName" | Set-Content -LiteralPath $ArchiveChecksumPath -Encoding ascii
 
-    $SourceChecksumPath = Join-Path $OutputDirectory ($Configuration.wireshark.source.filename + ".sha256")
+    $SourceOutput = Join-Path $OutputDirectory $Configuration.wireshark.source.filename
+    Copy-Item -LiteralPath $SourcePath -Destination $SourceOutput
+    $SourceChecksumPath = $SourceOutput + ".sha256"
     "$SourceHash  $($Configuration.wireshark.source.filename)" | Set-Content -LiteralPath $SourceChecksumPath -Encoding ascii
-    Copy-Item -LiteralPath $SourcePath -Destination (Join-Path $OutputDirectory $Configuration.wireshark.source.filename)
 
     $PackageResult = [ordered]@{
         schema_version = 1
         archive = $ArchivePath
         archive_sha256 = $ArchiveHash
         archive_checksum = $ArchiveChecksumPath
-        wireshark_source = Join-Path $OutputDirectory $Configuration.wireshark.source.filename
+        wireshark_source = $SourceOutput
         wireshark_source_checksum = $SourceChecksumPath
         observed_supply_chain = $ObservedPath
     }
