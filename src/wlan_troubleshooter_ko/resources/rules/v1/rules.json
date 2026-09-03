@@ -1,11 +1,1 @@
-{
-  "schema_version": 1,
-  "ruleset_version": "0.1.0",
-  "classifications": [
-    "확정",
-    "유력",
-    "참고",
-    "판단 불가"
-  ],
-  "rules": []
-}
+{"schema_version":1,"ruleset_version":"0.2.0","classifications":["확정","유력","참고","판단 불가"],"rules":[{"id":"WLAN-ASSOC-REJECT","classification":"확정","conditions":{"event":"wlan-association-reject"},"exclusions":{}},{"id":"WLAN-DISCONNECT","classification":"참고","conditions":{"event":"wlan-disconnect"},"exclusions":{}},{"id":"EAP-FAILURE","classification":"확정","conditions":{"event":"eap-failure"},"exclusions":{}},{"id":"RADIUS-ACCESS-REJECT","classification":"확정","conditions":{"event":"radius-access-reject"},"exclusions":{}},{"id":"DHCP-NAK","classification":"확정","conditions":{"event":"dhcp-nak"},"exclusions":{}},{"id":"DNS-ERROR-RESPONSE","classification":"확정","conditions":{"event":"dns-error-response"},"exclusions":{}},{"id":"TCP-RST","classification":"확정","conditions":{"event":"tcp-reset"},"exclusions":{}},{"id":"TCP-RETRANSMISSION-MANY","classification":"참고","conditions":{"event":"tcp-retransmission","minimum_frames":3},"exclusions":{"rf_root_cause":true}},{"id":"DHCP-RESPONSE-NOT-OBSERVED","classification":"판단 불가","conditions":{"request_observed":true,"response_observed":false,"minimum_tail_seconds":5},"exclusions":{"capture_complete":false}},{"id":"DNS-RESPONSE-NOT-OBSERVED","classification":"판단 불가","conditions":{"request_observed":true,"response_observed":false,"minimum_tail_seconds":2},"exclusions":{"capture_complete":false}},{"id":"TCP-SYNACK-NOT-OBSERVED","classification":"판단 불가","conditions":{"syn_observed":true,"synack_observed":false,"minimum_tail_seconds":3},"exclusions":{"capture_complete":false}}]}
