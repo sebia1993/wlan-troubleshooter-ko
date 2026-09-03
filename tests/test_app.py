@@ -17,7 +17,7 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "3")
+        self.assertEqual(result["phase"], "4A")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["field_profile_version"], "0.2.0")
@@ -25,7 +25,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
-        self.assertIn("프로토콜 인벤토리", result["analysis_features"])
+        self.assertIn("프로토콜 존재 인벤토리", result["analysis_features"])
 
     def test_self_check_can_write_new_local_json_for_windowed_exe(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -42,6 +42,32 @@ class AppSmokeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             main(["--self-check-output=https://example.invalid/output.json"])
 
+    def test_noninteractive_analysis_writes_path_free_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Path(directory).resolve() / "private-capture.pcap"
+            output = Path(directory).resolve() / "analysis.json"
+            capture.write_bytes(minimal_pcap())
+
+            exit_code = main(
+                [
+                    "--analyze-capture=" + str(capture),
+                    "--analysis-output=" + str(output),
+                ]
+            )
+            value = json.loads(output.read_text(encoding="utf-8"))
+            rendered = json.dumps(value, ensure_ascii=False)
+
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(value["protocol_inventory_state"], "unavailable")
+            self.assertNotIn(str(capture), rendered)
+            self.assertNotIn(capture.name, rendered)
+
+    def test_noninteractive_analysis_requires_both_paths(self):
+        with self.assertRaises(ValueError):
+            main(["--analyze-capture=C:/capture.pcap"])
+        with self.assertRaises(ValueError):
+            main(["--analysis-output=C:/analysis.json"])
+
     def test_view_model_does_not_need_tk_root(self):
         with tempfile.TemporaryDirectory() as directory:
             capture = Path(directory).resolve() / "synthetic.pcap"
@@ -56,10 +82,11 @@ class AppSmokeTests(unittest.TestCase):
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)
+            self.assertIsNotNone(view_model.analysis_result)
 
-    @mock.patch("wlan_troubleshooter_ko.ui.main_window.validate_capture")
-    def test_unexpected_file_error_is_safely_hidden(self, validate_mock):
-        validate_mock.side_effect = OSError("/private/customer/capture.pcap")
+    @mock.patch("wlan_troubleshooter_ko.ui.main_window.analyze_capture")
+    def test_unexpected_file_error_is_safely_hidden(self, analyze_mock):
+        analyze_mock.side_effect = OSError("/private/customer/capture.pcap")
         state = CaptureViewModel().select_capture("ignored.pcap")
         self.assertFalse(state.valid)
         self.assertNotIn("customer", state.detail)

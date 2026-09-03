@@ -1,10 +1,14 @@
-"""GUI와 오프라인 자체 점검 진입점."""
+"""GUI, 자체 점검과 비대화형 로컬 분석 진입점."""
 
 import argparse
 import tkinter
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
+from wlan_troubleshooter_ko.analysis.service import (
+    CaptureAnalysisError,
+    analyze_capture,
+)
 from wlan_troubleshooter_ko.core.canonical_json import dumps
 from wlan_troubleshooter_ko.core.config import load_example_profile, load_messages, load_ruleset
 from wlan_troubleshooter_ko.tshark.manifest import verify_bundle
@@ -46,9 +50,9 @@ def self_check() -> Dict[str, str]:
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
-        inventory_execution = "호출 준비 가능 · 실제 필드 호환성 실행 검증 필요"
+        inventory_execution = "활성 · 저장된 로컬 캡처의 프로토콜 존재 인벤토리"
     return {
-        "phase": "3",
+        "phase": "4A",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "message_locale": messages["locale"],
@@ -61,24 +65,28 @@ def self_check() -> Dict[str, str]:
         "tshark_external_required": tshark_external_required,
         "portable_tshark": tshark_status,
         "protocol_inventory_execution": inventory_execution,
-        "analysis_features": "Phase 2A 구조 점검 + Phase 2B 필드·TSV·프로토콜 인벤토리 정규화",
+        "analysis_features": "캡처 구조 점검 + 내장 TShark 프로토콜 존재 인벤토리",
         "network_features": "없음",
     }
 
 
-def _write_self_check_output(raw_path: str, value: Dict[str, str]) -> None:
+def _write_new_local_json(raw_path: str, value: Dict[str, object], label: str) -> None:
     if (
         not raw_path
         or "\x00" in raw_path
         or "://" in raw_path
         or raw_path.startswith(("\\\\", "//"))
     ):
-        raise ValueError("자체 점검 출력은 로컬 절대경로여야 합니다.")
+        raise ValueError(label + "은 로컬 절대경로여야 합니다.")
     path = Path(raw_path)
     if not path.is_absolute() or not path.parent.is_dir() or path.is_symlink():
-        raise ValueError("자체 점검 출력 경로를 사용할 수 없습니다.")
+        raise ValueError(label + " 경로를 사용할 수 없습니다.")
     with path.open("x", encoding="utf-8", newline="\n") as handle:
         handle.write(dumps(value))
+
+
+def _write_self_check_output(raw_path: str, value: Dict[str, str]) -> None:
+    _write_new_local_json(raw_path, value, "자체 점검 출력")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,7 +102,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--self-check-output",
         help="창과 콘솔 없이 자체 점검 JSON을 새 로컬 파일에 기록합니다.",
     )
+    parser.add_argument(
+        "--analyze-capture",
+        help="저장된 로컬 PCAP 또는 PCAPNG를 비대화형으로 분석합니다.",
+    )
+    parser.add_argument(
+        "--analysis-output",
+        help="비대화형 분석 결과를 새 로컬 JSON 파일에 기록합니다.",
+    )
     return parser
+
+
+def _run_noninteractive_analysis(capture_path: str, output_path: str) -> int:
+    resources = package_root() / "resources"
+    vendor_root = distribution_root() / "vendor" / "wireshark"
+    profile_path = resources / "tshark" / "field-profiles.v1.json"
+    try:
+        result = analyze_capture(capture_path, vendor_root, profile_path)
+        payload = result.to_dict()
+        exit_code = 0 if result.inventory_state == "completed" else 2
+    except CaptureAnalysisError as exc:
+        payload = {
+            "schema_version": 1,
+            "protocol_inventory_state": "failed",
+            "protocol_inventory_message": str(exc),
+        }
+        exit_code = 2
+    except Exception:
+        payload = {
+            "schema_version": 1,
+            "protocol_inventory_state": "failed",
+            "protocol_inventory_message": "캡처 분석을 안전하게 완료하지 못했습니다.",
+        }
+        exit_code = 2
+    _write_new_local_json(output_path, payload, "분석 결과 출력")
+    return exit_code
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -106,6 +148,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             print(dumps(result), end="")
         return 0
+
+    if bool(arguments.analyze_capture) != bool(arguments.analysis_output):
+        raise ValueError("비대화형 분석에는 입력 캡처와 결과 출력 경로가 모두 필요합니다.")
+    if arguments.analyze_capture and arguments.analysis_output:
+        return _run_noninteractive_analysis(
+            arguments.analyze_capture,
+            arguments.analysis_output,
+        )
 
     from wlan_troubleshooter_ko.ui.main_window import launch
 
