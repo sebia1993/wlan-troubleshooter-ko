@@ -1,46 +1,79 @@
 # wlan-troubleshooter-ko
 
-Windows 11에서 로컬 PCAP·PCAPNG를 외부로 전송하지 않고 분석하여, 초급 네트워크 엔지니어에게 확인 가능한 범위와 근거를 쉬운 한국어로 안내하는 완전 오프라인 도구입니다.
+Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 점검하여, 초급 네트워크 엔지니어에게 확인 가능한 범위와 근거를 쉬운 한국어로 안내하는 도구입니다.
 
-이 프로젝트는 AI로 원인을 생성하지 않습니다. 실제 패킷에서 관찰된 사실, 확인할 수 없는 영역, 다음 점검 대상을 결정론적으로 분리하는 것을 목표로 합니다.
+AI로 원인을 생성하지 않습니다. 입력 파일을 업로드하지 않으며 런타임 외부 통신, 텔레메트리, 자동 업데이트, 온라인 조회를 포함하지 않습니다.
 
-## 현재 구현 상태
+## 가장 쉬운 실행 방법
 
-- Phase 0: 저장소·보안 정책·정적 감사
-- Phase 1: 최소 GUI·입력 검증·격리 작업공간·Portable TShark 공급망 경계
-- Phase 2A: PCAP·PCAPNG 구조·Link Type·Snap Length·잘린 패킷 사전 점검
-- Phase 2B: TShark 필드 카탈로그 파서·고정 추출 프로파일·fields 출력 파서·프로토콜 존재 인벤토리 정규화·실행 전 argv 준비
+`v0.3.0-alpha.1` 릴리즈에서 다음 파일을 받습니다.
 
-Phase 2B는 승인된 TShark가 없어도 프로파일과 파서 자체를 검증할 수 있습니다. 다만 실제 `-G fields`와 PCAP `-T fields` 실행은 아직 활성화하지 않았습니다.
+```text
+WlanTroubleshooterKO-v0.3.0-alpha.1-win64-portable.zip
+```
 
-## v0.2.0-alpha.2 프리뷰
+1. ZIP을 로컬 폴더에 완전히 압축 해제합니다.
+2. 압축을 푼 폴더의 `WlanTroubleshooterKO.exe`를 실행합니다.
+3. `PCAP 또는 PCAPNG 파일 선택`을 누릅니다.
+4. 캡처 유형, 인터페이스, 패킷 잘림과 분석 가능 범위를 확인합니다.
 
-이번 프리뷰에는 다음 기반이 추가됩니다.
+ZIP 안에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.js, 관리자 권한과 인터넷 연결은 필요하지 않습니다.
 
-- `frame.number`, 선택적인 `frame.interface_id`, `frame.cap_len`, `frame.len`, `frame.protocols`만 사용하는 최소 추출 프로파일
-- TShark 버전별 필수·선택 필드 호환성 해석
-- Radiotap·802.11·EAPOL·EAP·RADIUS·DHCP·DNS·ARP·TCP·TLS·ICMP·QUIC 그룹별 프레임 존재 집계
-- 프로토콜 미관찰을 장애로 오해하지 않도록 하는 고정 주의 문구
-- 무순서 필드 요청의 승인 순서 정규화와 기존 argv의 엄격한 재검증
+## Portable 패키지에 포함되는 것
 
-이 릴리즈는 Python 3.13이 필요한 소스 프리뷰이며 승인 Portable TShark, Python 런타임, DLL, Windows 설치 프로그램을 포함하지 않습니다.
+```text
+WlanTroubleshooterKO.exe       사용자 프로그램
+_internal/                     내장 Python 3.13·Tcl/Tk 런타임
+vendor/wireshark/tshark.exe    내장 Wireshark 패킷 해석 엔진
+vendor/wireshark/manifest.json TShark 파일 무결성 목록
+licenses/                      Python·Tcl·Tk·PyInstaller 라이선스
+BUILD_INFO.json                빌드 버전·공급망 정보
+```
 
-## 고정 원칙
+TShark는 공식 Wireshark 4.6.8 x64 MSI에서 추출합니다. 빌드 서버는 MSI의 Authenticode 서명과 고정 SHA-256을 확인하고, 최종 패키지의 모든 TShark 파일을 별도 매니페스트로 봉인합니다. 사용자 PC에서는 다운로드나 설치를 하지 않습니다.
 
-- AI·LLM·Ollama·MCP·외부 API·런타임 네트워크 기능 없음
-- 텔레메트리·자동 업데이트·온라인 조회 없음
-- 입력 PCAP 업로드·외부 전송 없음
+## 현재 가능한 기능
+
+- PCAP·PCAPNG 형식과 기본 구조 검사
+- 다중 Section·다중 인터페이스 PCAPNG 처리
+- Link Type과 Snap Length 확인
+- 잘린 패킷과 불완전 스캔 경고
+- Radiotap·IEEE 802.11·Ethernet·PPI의 보수적 분류
+- 현재 캡처에서 확인 가능한 항목과 확인할 수 없는 항목 안내
+- TShark 필드 카탈로그·고정 필드 프로파일·프로토콜 인벤토리 정규화 기반
+- 내장 Python과 TShark의 실행·무결성 빌드 검증
+
+## 아직 지원하지 않는 기능
+
+- EAP·RADIUS·DHCP·DNS·TCP의 실제 성공·실패 판정
+- 4-Way Handshake와 로밍 장애 판정
+- 최종 한국어 장애 Finding과 HTML 보고서
+- 실시간·원격 캡처
+- 장비 로그인·조회·설정 변경
+- Payload·쿠키·Authorization·자격 증명·파일 추출
+- 온라인 OUI·WHOIS·GeoIP 조회
+
+현재 릴리즈는 **실행 가능한 캡처 사전 점검 프리뷰**입니다. 프로토콜이 보였다는 사실은 접속 성공을 뜻하지 않고, 보이지 않았다는 사실도 장애 증거가 아닙니다.
+
+## 데이터 반출 방지 원칙
+
+- AI·LLM·Ollama·MCP·외부 API 없음
+- HTTP·소켓·DNS 조회·수신 포트 없음
+- 텔레메트리·오류 자동 전송·자동 업데이트 없음
 - 시스템 TShark와 `PATH` 자동 대체 없음
-- Raw Payload·쿠키·Authorization·자격 증명 추출 없음
-- 실제 사내 PCAP·프로파일·로그·보고서의 공개 저장소 커밋 금지
-- 패킷 부재와 프로토콜 미관찰을 장애 증거로 사용하지 않음
-- Radiotap 없이 RF 품질을 판정하지 않음
+- 실시간 캡처용 `dumpcap.exe`와 Wireshark GUI를 Portable 패키지에서 제거
+- TShark 실행 시 이름 해석 비활성화와 빈 설정·플러그인·extcap 환경 사용
+- 실제 사내 PCAP·프로파일·로그·보고서를 공개 저장소에 커밋하지 않음
 
-## Phase 2B 결과의 의미
+## SHA-256 확인
 
-프로토콜 인벤토리는 패킷에 특정 프로토콜 토큰이 관찰됐는지만 집계합니다. 예를 들어 RADIUS가 관찰됐다는 것은 인증 성공을 뜻하지 않고, RADIUS가 관찰되지 않았다는 것도 ClearPass 장애를 뜻하지 않습니다.
+릴리즈에는 Portable ZIP과 같은 이름의 `.sha256` 파일이 함께 제공됩니다.
 
-실제 접속 성공·실패와 장애 단계 판정은 후속 이벤트 상관분석 단계에서 근거 프레임과 Display Filter를 함께 제공할 때만 수행합니다.
+```powershell
+Get-FileHash .\WlanTroubleshooterKO-v0.3.0-alpha.1-win64-portable.zip -Algorithm SHA256
+```
+
+출력된 값이 `.sha256` 파일의 값과 일치하는지 확인합니다. 현재 애플리케이션 EXE 자체의 상용 코드 서명 인증서는 구성되지 않았으므로 Windows에서 `알 수 없는 게시자` 경고가 표시될 수 있습니다.
 
 ## 개발 검증
 
@@ -54,16 +87,6 @@ py -3.13 scripts/audit_repository.py
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify_offline.ps1
 ```
 
-테스트는 임시 디렉터리에 최소 합성 PCAP·PCAPNG·필드 카탈로그·TSV를 생성합니다. 실제 캡처는 저장소에 넣지 않습니다.
+Portable 빌드는 공식 Wireshark 파일과 PyInstaller 패키지를 내려받으므로 GitHub Actions 빌드 단계에서만 네트워크를 사용합니다. 생성된 프로그램 런타임에는 다운로드 코드가 포함되지 않습니다.
 
-## 아직 지원하지 않는 기능
-
-- 승인 TShark를 사용한 실제 프로토콜 추출
-- EAP·RADIUS·DHCP·DNS·TCP 이벤트 상관분석과 장애 Finding
-- 실시간·원격 캡처
-- 장비 로그인·조회·설정 변경
-- Payload·파일·자격 증명 추출
-- 온라인 OUI·WHOIS·GeoIP 조회
-- 독립 실행 Windows EXE
-
-세부 범위는 `docs/PHASE_2B_PLAN.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`를 확인합니다.
+세부 배포 설계는 `docs/PHASE_3_PORTABLE_PLAN.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`, 제3자 고지는 `THIRD_PARTY_NOTICES.md`를 확인합니다.

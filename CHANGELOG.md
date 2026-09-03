@@ -1,35 +1,35 @@
 # 변경 기록
 
-## 0.2.0-alpha.2 — 2026-09-03
+## 0.3.0-alpha.1 — 2026-09-04
 
 ### 추가
 
-- TShark `-G fields` P·F 레코드 카탈로그 파서
-- 버전 고정 최소 필드 프로파일과 엄격한 JSON 검증
-- 필수·선택 필드 호환성 해석
-- 고정 이중 따옴표·탭 구분 fields 출력 파서
-- 프로토콜 그룹별 관찰 프레임 수·첫 프레임·마지막 프레임 집계
-- 승인 필드·필터·패킷 상한만 포함하는 실행 전 argv 준비
-- 합성 카탈로그·TSV·매니페스트 기반 Phase 2B 테스트
+- Python 미설치 Windows 11 PC용 PyInstaller `onedir` GUI 실행 파일
+- 공식 Wireshark 4.6.8 x64 기반 내장 TShark 런타임
+- Wireshark MSI Authenticode 서명과 고정 SHA-256 검증
+- 전체 TShark 파일 목록·크기·SHA-256 매니페스트
+- Python 경로를 제거한 상태의 EXE 자체 점검
+- 내장 TShark `-n -v`와 `-n -G fields` 빌드 Smoke Test
+- Python·Tcl·Tk·PyInstaller·Wireshark 라이선스 파일
+- Portable ZIP·ZIP SHA-256·정확한 Wireshark 소스 아카이브 릴리즈 자동화
 
-### 변경
+### 보안
 
-- 애플리케이션 단계 표시를 Phase 2B로 갱신
-- 패키지 버전을 `0.2.0a2`로 갱신
-- 무순서 필드 입력은 승인 순서로 정규화하되 이미 생성된 argv는 고정 순서를 강제
+- `tshark.exe` 이외의 Wireshark 실행 파일과 extcap·Npcap·plugin 디렉터리를 Portable 패키지에서 제거
+- 최종 패키지의 실행 파일을 `WlanTroubleshooterKO.exe`와 `vendor/wireshark/tshark.exe` 두 개로 제한
+- 빌드 입력 URL·버전·해시를 저장소 고정값으로 제한
+- 런타임 외부 통신, AI, 텔레메트리, 자동 업데이트 없음
 
 ### 제한
 
-- 승인된 Portable TShark의 실제 필드 추출은 아직 활성화하지 않음
-- 식별자와 Payload 필드는 추출 프로파일에서 제외
-- 프로토콜 존재 여부는 장애 원인이나 접속 성공을 뜻하지 않음
+- 애플리케이션 EXE의 상용 코드 서명 인증서는 아직 없음
+- 실제 EAP·RADIUS·DHCP·DNS·TCP 장애 판정은 아직 지원하지 않음
+- 현재 UI는 캡처 구조와 분석 가능 범위의 프리뷰임
+
+## 0.2.0-alpha.2 — 2026-09-03
+
+- TShark 필드 카탈로그·고정 프로파일·fields 파서·프로토콜 인벤토리 정규화 기반
 
 ## 0.2.0-alpha.1 — 2026-09-03
 
-### 추가
-
-- PCAP·PCAPNG 컨테이너 구조 사전 점검
-- 인터페이스별 Link Type·Snap Length·패킷 수 정규화
-- Radiotap·IEEE 802.11·Ethernet·PPI의 보수적 분류
-- 잘린 패킷과 부분 스캔 경고
-- 초급자용 캡처 분석 가능 범위 GUI
+- PCAP·PCAPNG 구조·Link Type·Snap Length·잘린 패킷 사전 점검

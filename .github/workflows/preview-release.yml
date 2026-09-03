@@ -1,4 +1,4 @@
-name: Preview Release
+name: Win64 Portable Preview Release
 
 on:
   push:
@@ -7,7 +7,11 @@ on:
     paths:
       - pyproject.toml
       - src/wlan_troubleshooter_ko/__init__.py
+      - src/wlan_troubleshooter_ko/app.py
+      - src/wlan_troubleshooter_ko/resources/**
+      - tests/portable_build/**
       - RELEASE_NOTES.md
+      - THIRD_PARTY_NOTICES.md
       - .github/workflows/preview-release.yml
   workflow_dispatch:
 
@@ -15,15 +19,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: wlan-troubleshooter-ko-preview-release
+  group: wlan-troubleshooter-ko-portable-release
   cancel-in-progress: false
 
 jobs:
   release:
-    name: Validate and publish source preview
+    name: Validate, build, and publish Win64 Portable
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -32,18 +36,18 @@ jobs:
 
     steps:
       - name: Check out source without persisted credentials
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python 3.13 x64
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
           architecture: x64
 
-      - name: Run complete offline validation gate
+      - name: Run complete runtime-offline validation gate
         shell: pwsh
         run: ./scripts/verify_offline.ps1 -PythonPath python
 
@@ -51,9 +55,9 @@ jobs:
         id: metadata
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
           $Project = Get-Content -LiteralPath "pyproject.toml" -Raw
           $Module = Get-Content -LiteralPath "src/wlan_troubleshooter_ko/__init__.py" -Raw
+          $Supply = Get-Content -LiteralPath "tests/portable_build/supply-chain.json" -Raw | ConvertFrom-Json
 
           $ProjectVersion = [regex]::Match($Project, '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
           $ModuleVersion = [regex]::Match($Module, '(?m)^__version__\s*=\s*"([^"]+)"').Groups[1].Value
@@ -67,91 +71,60 @@ jobs:
           if ($ProjectVersion -ne $ModuleVersion) {
               throw "Project and module versions do not match."
           }
-          if ($Tag -notmatch '^v[0-9]') {
-              throw "Release tag format is invalid."
+          if ($Tag -ne "v0.3.0-alpha.1" -or $Supply.wireshark.msi.sha256 -eq "DISCOVER") {
+              throw "Portable release supply-chain metadata is not pinned."
           }
-
-          "version=$ProjectVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "tag=$Tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "title=$Title" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "prerelease=$($PrereleaseText.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Build source-only preview archive
+      - name: Install exact build-only Python packages
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --no-input --no-deps -r tests/portable_build/requirements-build.txt
+          python -m pip check
+
+      - name: Build and finalize Portable release assets
         id: package
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-          $Tag = '${{ steps.metadata.outputs.tag }}'
-          $SafeTag = $Tag -replace '[^A-Za-z0-9._-]', '-'
-          $Stage = Join-Path $env:RUNNER_TEMP "wlan-troubleshooter-ko-$SafeTag"
-          $Archive = Join-Path $env:RUNNER_TEMP "wlan-troubleshooter-ko-$SafeTag-source-preview.zip"
-          $Checksum = "$Archive.sha256"
-
-          Remove-Item -LiteralPath $Stage -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath $Checksum -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $Stage | Out-Null
-
-          Copy-Item -LiteralPath "src" -Destination $Stage -Recurse
-          @(
-              "README.md",
-              "LICENSE",
-              "THIRD_PARTY_NOTICES.md",
-              "IMPLEMENTATION_STATUS.md",
-              "CHANGELOG.md",
-              "RELEASE_NOTES.md",
-              "pyproject.toml"
-          ) | ForEach-Object { Copy-Item -LiteralPath $_ -Destination $Stage }
-
-          $Launcher = @'
-          [CmdletBinding()]
-          param([switch]$SelfCheck)
-          $env:PYTHONPATH = Join-Path $PSScriptRoot "src"
-          $Arguments = @("-3.13", "-m", "wlan_troubleshooter_ko")
-          if ($SelfCheck) {
-              $Arguments += "--self-check"
+          $Output = Join-Path $env:RUNNER_TEMP "portable-release-output"
+          ./tests/portable_build/build_portable.ps1 -Mode Build -PythonPath python -OutputDirectory $Output
+          ./tests/portable_build/finalize_portable.ps1 -PackageOutputPath (Join-Path $Output "package-output.json") -PythonPath python
+          $Package = Get-Content -LiteralPath (Join-Path $Output "package-output.json") -Raw | ConvertFrom-Json
+          foreach ($Name in @("archive", "archive_checksum", "wireshark_source", "wireshark_source_checksum", "observed_supply_chain")) {
+              $Value = [string]$Package.$Name
+              if (-not (Test-Path -LiteralPath $Value -PathType Leaf)) {
+                  throw "Release asset is missing: $Name"
+              }
+              "$Name=$Value" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           }
-          & py @Arguments
-          exit $LASTEXITCODE
-          '@
-          Set-Content -LiteralPath (Join-Path $Stage "START_PREVIEW.ps1") -Value $Launcher -Encoding utf8
-
-          Get-ChildItem -LiteralPath $Stage -Directory -Recurse -Filter "__pycache__" |
-              Remove-Item -Recurse -Force
-          Get-ChildItem -LiteralPath $Stage -File -Recurse -Include "*.pyc", "*.pyo" |
-              Remove-Item -Force
-
-          Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $Archive -CompressionLevel Optimal
-          $Hash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$Hash  $(Split-Path -Leaf $Archive)" | Set-Content -LiteralPath $Checksum -Encoding ascii
-
-          "archive=$Archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "checksum=$Checksum" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "archive_sha256=$($Package.archive_sha256)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "archive_size_bytes=$($Package.archive_size_bytes)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Get-Content -LiteralPath (Join-Path $Output "package-output.json")
 
       - name: Create or refresh GitHub prerelease
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = "Stop"
           $Tag = '${{ steps.metadata.outputs.tag }}'
           $Title = '${{ steps.metadata.outputs.title }}'
-          $Archive = '${{ steps.package.outputs.archive }}'
-          $Checksum = '${{ steps.package.outputs.checksum }}'
-          $IsPrerelease = '${{ steps.metadata.outputs.prerelease }}' -eq 'true'
+          $Assets = @(
+              '${{ steps.package.outputs.archive }}',
+              '${{ steps.package.outputs.archive_checksum }}',
+              '${{ steps.package.outputs.wireshark_source }}',
+              '${{ steps.package.outputs.wireshark_source_checksum }}',
+              '${{ steps.package.outputs.observed_supply_chain }}'
+          )
 
           & gh release view $Tag --repo $env:GITHUB_REPOSITORY *> $null
           $Exists = $LASTEXITCODE -eq 0
-
           if ($Exists) {
-              & gh release edit $Tag --repo $env:GITHUB_REPOSITORY --title $Title --notes-file RELEASE_NOTES.md
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Failed to update the existing release."
-              }
-              & gh release upload $Tag $Archive $Checksum --repo $env:GITHUB_REPOSITORY --clobber
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Failed to refresh release assets."
-              }
+              & gh release edit $Tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $Title --notes-file RELEASE_NOTES.md
+              if ($LASTEXITCODE -ne 0) { throw "Failed to update the existing release." }
+              & gh release upload $Tag @Assets --repo $env:GITHUB_REPOSITORY --clobber
+              if ($LASTEXITCODE -ne 0) { throw "Failed to refresh release assets." }
           }
           else {
               $Arguments = @(
@@ -161,12 +134,18 @@ jobs:
                   "--title", $Title,
                   "--notes-file", "RELEASE_NOTES.md"
               )
-              if ($IsPrerelease) {
+              if ('${{ steps.metadata.outputs.prerelease }}' -eq 'true') {
                   $Arguments += "--prerelease"
               }
-              $Arguments += @($Archive, $Checksum)
+              $Arguments += $Assets
               & gh @Arguments
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Failed to create the preview release."
-              }
+              if ($LASTEXITCODE -ne 0) { throw "Failed to create the Portable prerelease." }
           }
+
+      - name: Publish release build summary
+        shell: pwsh
+        run: |
+          "### Win64 Portable release" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Tag: ${{ steps.metadata.outputs.tag }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- ZIP bytes: ${{ steps.package.outputs.archive_size_bytes }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- ZIP SHA-256: `${{ steps.package.outputs.archive_sha256 }}`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
