@@ -146,6 +146,39 @@ def _stable_file_stats(path: Path, handle: BinaryIO) -> os.stat_result:
     return handle_stat
 
 
+def _verify_digest_after_reopen(
+    path: Path,
+    expected_metadata: os.stat_result,
+    expected_digest: str,
+    cancel_event: Optional[threading.Event],
+) -> None:
+    """재개방 파일의 정체성과 전체 해시를 다시 비교한다.
+
+    일부 Windows 파일시스템에서는 같은 크기의 제자리 쓰기가 매우 짧은
+    시간 안에 일어나면 mtime/ctime만으로 변경을 놓칠 수 있다. 따라서
+    최초 핸들을 닫은 뒤 같은 경로를 다시 열어 파일 정체성과 전체 해시를
+    모두 비교한다. 검증 비용보다 민감 캡처의 TOCTOU 차단을 우선한다.
+    """
+
+    try:
+        with _open_regular_readonly(path) as handle:
+            before_hash = _stable_file_stats(path, handle)
+            if not _same_file_state(expected_metadata, before_hash):
+                raise CaptureValidationError("파일이 확인 중 교체됐습니다.")
+            reopened_digest = _sha256_handle(handle, cancel_event, 1024 * 1024)
+            after_hash = _stable_file_stats(path, handle)
+            if (
+                not _same_file_state(before_hash, after_hash)
+                or not _same_file_state(expected_metadata, after_hash)
+                or reopened_digest != expected_digest
+            ):
+                raise CaptureValidationError("파일이 확인 중 변경됐습니다.")
+    except CaptureValidationError:
+        raise
+    except OSError:
+        raise CaptureValidationError("캡처 파일을 안전하게 다시 확인할 수 없습니다.") from None
+
+
 def sha256_file(
     path: Path,
     chunk_size: int = 1024 * 1024,
@@ -229,12 +262,9 @@ def validate_capture(
             final_open_metadata = _stable_file_stats(resolved, handle)
             if not _same_file_state(metadata, final_open_metadata):
                 raise CaptureValidationError("파일이 확인 중 변경됐습니다.")
-        # 원본 핸들이 닫힌 뒤에도 경로가 같은 파일을 가리키는지 확인한다.
-        # Windows의 불완전한 path stat 대신 재개방 핸들의 fstat를 사용한다.
-        with _open_regular_readonly(resolved) as final_path_handle:
-            final_path_metadata = _stable_file_stats(resolved, final_path_handle)
-        if not _same_file_state(metadata, final_path_metadata):
-            raise CaptureValidationError("파일이 확인 중 교체됐습니다.")
+        # Windows에서 같은 크기의 제자리 쓰기가 파일시각 정밀도에 가려질
+        # 수 있으므로 최초 핸들을 닫은 뒤 전체 해시를 다시 검증한다.
+        _verify_digest_after_reopen(resolved, metadata, digest, cancel_event)
     except CaptureValidationError:
         raise
     except OSError:

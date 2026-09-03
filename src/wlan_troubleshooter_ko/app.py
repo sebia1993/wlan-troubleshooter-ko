@@ -28,13 +28,14 @@ def self_check() -> Dict[str, str]:
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
     return {
-        "phase": "0-1",
+        "phase": "2A",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "message_locale": messages["locale"],
         "profile": profile["profile_id"],
         "tkinter": "사용 가능",
         "portable_tshark": tshark_status,
+        "analysis_features": "캡처 구조·Link Type·패킷 잘림 사전 점검",
         "network_features": "없음",
     }
 
@@ -46,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--self-test",
         dest="self_check",
         action="store_true",
-        help="창을 열지 않고 Phase 0·1 리소스와 Tkinter를 검사합니다.",
+        help="창을 열지 않고 Phase 2A 리소스와 Tkinter를 검사합니다.",
     )
     return parser
 

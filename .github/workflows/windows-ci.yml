@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  phase-0-1-validation:
-    name: Phase 0-1 offline foundation
+  phase-0-2a-validation:
+    name: Phase 0-2A offline validation
     runs-on: windows-latest
     timeout-minutes: 20
     env:
@@ -38,6 +38,6 @@ jobs:
           python-version: "3.13"
           architecture: x64
 
-      - name: Run offline foundation verification
+      - name: Run offline validation
         shell: pwsh
         run: ./scripts/verify_offline.ps1 -PythonPath python
