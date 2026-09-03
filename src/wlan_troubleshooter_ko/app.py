@@ -39,33 +39,39 @@ def self_check() -> Dict[str, str]:
     profile = load_example_profile(resources / "profiles" / "site-default.example.json")
     field_registry = load_field_profiles(resources / "tshark" / "field-profiles.v1.json")
     inventory_profile = field_registry.get_profile("protocol-inventory")
+    event_profile = field_registry.get_profile("connection-events")
     tkinter.Tcl()
 
     vendor_root = distribution_root() / "vendor" / "wireshark"
     vendor_manifest = vendor_root / "manifest.json"
     tshark_status = "프로젝트 고정 TShark 미포함"
     tshark_external_required = "true"
-    inventory_execution = "비활성 · 프로젝트 고정 Portable TShark 대기"
+    analysis_execution = "비활성 · 프로젝트 고정 Portable TShark 대기"
     if vendor_manifest.exists():
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
-        inventory_execution = "활성 · 저장된 로컬 캡처의 프로토콜 존재 인벤토리"
+        analysis_execution = "활성 · 프로토콜 인벤토리와 접속 단계 Finding"
     return {
-        "phase": "4A",
+        "phase": "4B",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
+        "rule_count": str(len(rules["rules"])),
         "message_locale": messages["locale"],
         "profile": profile["profile_id"],
         "field_profile_version": field_registry.profile_version,
         "inventory_field_count": str(len(inventory_profile.fields)),
+        "event_field_count": str(len(event_profile.fields)),
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
         "python_external_required": "true" if _external_python_required() else "false",
         "tshark_external_required": tshark_external_required,
         "portable_tshark": tshark_status,
-        "protocol_inventory_execution": inventory_execution,
-        "analysis_features": "캡처 구조 점검 + 내장 TShark 프로토콜 존재 인벤토리",
+        "protocol_inventory_execution": analysis_execution,
+        "analysis_features": (
+            "캡처 구조 점검 + 프로토콜 존재 인벤토리 + "
+            "접속 단계 상관분석·근거 기반 Finding"
+        ),
         "network_features": "없음",
     }
 
@@ -117,20 +123,26 @@ def _run_noninteractive_analysis(capture_path: str, output_path: str) -> int:
     resources = package_root() / "resources"
     vendor_root = distribution_root() / "vendor" / "wireshark"
     profile_path = resources / "tshark" / "field-profiles.v1.json"
+    rules_path = resources / "rules" / "v1" / "rules.json"
     try:
-        result = analyze_capture(capture_path, vendor_root, profile_path)
+        result = analyze_capture(
+            capture_path,
+            vendor_root,
+            profile_path,
+            rules_path=rules_path,
+        )
         payload = result.to_dict()
         exit_code = 0 if result.inventory_state == "completed" else 2
     except CaptureAnalysisError as exc:
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "protocol_inventory_state": "failed",
             "protocol_inventory_message": str(exc),
         }
         exit_code = 2
     except Exception:
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "protocol_inventory_state": "failed",
             "protocol_inventory_message": "캡처 분석을 안전하게 완료하지 못했습니다.",
         }
