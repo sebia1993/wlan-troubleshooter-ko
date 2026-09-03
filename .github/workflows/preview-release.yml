@@ -148,4 +148,4 @@ jobs:
           "### Win64 Portable release" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "- Tag: ${{ steps.metadata.outputs.tag }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "- ZIP bytes: ${{ steps.package.outputs.archive_size_bytes }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "- ZIP SHA-256: `${{ steps.package.outputs.archive_sha256 }}`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          ("- ZIP SHA-256: " + '${{ steps.package.outputs.archive_sha256 }}') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
