@@ -80,22 +80,34 @@ print(sorted(str(item) for item in candidates)[0])
     return $Result
 }
 
+$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$ProjectText = Get-Content -LiteralPath (Join-Path $RepositoryRoot "pyproject.toml") -Raw
+$ReleaseTag = [regex]::Match($ProjectText, '(?m)^release-tag\s*=\s*"([^"]+)"').Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($ReleaseTag) -or $ReleaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$') {
+    throw "Portable release tag is missing or invalid."
+}
+$ProductVersion = $ReleaseTag.Substring(1)
+
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
 if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) {
     throw "Package output metadata is missing."
 }
 $Package = Get-Content -LiteralPath $PackageOutputPath -Raw | ConvertFrom-Json -Depth 32
-$Archive = [System.IO.Path]::GetFullPath([string]$Package.archive)
-$Checksum = [System.IO.Path]::GetFullPath([string]$Package.archive_checksum)
-if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
+$OriginalArchive = [System.IO.Path]::GetFullPath([string]$Package.archive)
+$OriginalChecksum = [System.IO.Path]::GetFullPath([string]$Package.archive_checksum)
+if (-not (Test-Path -LiteralPath $OriginalArchive -PathType Leaf)) {
     throw "Portable archive is missing."
 }
+$OutputDirectory = Split-Path -Parent $OriginalArchive
+$FinalArchiveName = "WlanTroubleshooterKO-$ReleaseTag-win64-portable.zip"
+$FinalArchive = Join-Path $OutputDirectory $FinalArchiveName
+$FinalChecksum = $FinalArchive + ".sha256"
 
 $WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-finalize-" + [guid]::NewGuid().ToString("N"))
 $Expanded = Join-Path $WorkRoot "expanded"
 New-Item -ItemType Directory -Path $Expanded -Force | Out-Null
 try {
-    Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
+    Expand-Archive -LiteralPath $OriginalArchive -DestinationPath $Expanded
     $Licenses = Join-Path $Expanded "licenses"
     New-Item -ItemType Directory -Path $Licenses -Force | Out-Null
 
@@ -128,6 +140,17 @@ try {
         }
     }
 
+    $BuildInfoPath = Join-Path $Expanded "BUILD_INFO.json"
+    $BuildInfo = Get-Content -LiteralPath $BuildInfoPath -Raw | ConvertFrom-Json -Depth 32
+    $BuildInfo.product_version = $ProductVersion
+    if ($BuildInfo.PSObject.Properties.Name -contains "protocol_inventory_runtime") {
+        $BuildInfo.protocol_inventory_runtime = "enabled"
+    }
+    else {
+        $BuildInfo | Add-Member -NotePropertyName protocol_inventory_runtime -NotePropertyValue "enabled"
+    }
+    $BuildInfo | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $BuildInfoPath -Encoding utf8
+
     $Executables = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File -Filter "*.exe" | ForEach-Object {
         [System.IO.Path]::GetRelativePath($Expanded, $_.FullName).Replace("\", "/")
     } | Sort-Object)
@@ -136,19 +159,24 @@ try {
         throw "Portable stage contains an unexpected executable."
     }
 
-    Remove-Item -LiteralPath $Archive -Force
-    Compress-Archive -Path (Join-Path $Expanded "*") -DestinationPath $Archive -CompressionLevel Optimal
-    $Hash = Get-LowerSha256 -Path $Archive
-    $ArchiveName = Split-Path -Leaf $Archive
-    "$Hash  $ArchiveName" | Set-Content -LiteralPath $Checksum -Encoding ascii
+    foreach ($Path in @($OriginalArchive, $OriginalChecksum, $FinalArchive, $FinalChecksum) | Select-Object -Unique) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    }
+    Compress-Archive -Path (Join-Path $Expanded "*") -DestinationPath $FinalArchive -CompressionLevel Optimal
+    $Hash = Get-LowerSha256 -Path $FinalArchive
+    "$Hash  $FinalArchiveName" | Set-Content -LiteralPath $FinalChecksum -Encoding ascii
 
+    $Package.archive = $FinalArchive
+    $Package.archive_checksum = $FinalChecksum
     $Package.archive_sha256 = $Hash
     if ($Package.PSObject.Properties.Name -contains "archive_size_bytes") {
-        $Package.archive_size_bytes = (Get-Item -LiteralPath $Archive).Length
+        $Package.archive_size_bytes = (Get-Item -LiteralPath $FinalArchive).Length
     }
     else {
-        $Package | Add-Member -NotePropertyName archive_size_bytes -NotePropertyValue (Get-Item -LiteralPath $Archive).Length
+        $Package | Add-Member -NotePropertyName archive_size_bytes -NotePropertyValue (Get-Item -LiteralPath $FinalArchive).Length
     }
+    $Package | Add-Member -NotePropertyName release_tag -NotePropertyValue $ReleaseTag -Force
+    $Package | Add-Member -NotePropertyName product_version -NotePropertyValue $ProductVersion -Force
     $Package | Add-Member -NotePropertyName bundled_license_files -NotePropertyValue @(
         "PYTHON-LICENSE.txt",
         "TCL-LICENSE.txt",

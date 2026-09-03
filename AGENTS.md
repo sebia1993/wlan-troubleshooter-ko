@@ -4,48 +4,55 @@
 
 ## 현재 범위
 
-사용자는 2026년 9월 4일 별도 회사 승인 절차가 없음을 확인하고 Python·Wireshark 미설치 PC용 Windows Portable 배포 개발과 릴리즈를 승인했습니다. 현재 범위는 `docs/PHASE_3_PORTABLE_PLAN.md`입니다.
+사용자는 2026년 9월 4일 Portable 배포 이후 실제 패킷 분석 개발과 릴리즈 갱신을 승인했습니다. 현재 범위는 `docs/PHASE_4A_PLAN.md`의 **내장 TShark 프로토콜 존재 인벤토리**입니다.
 
-- Python 3.13과 Tcl/Tk를 PyInstaller `onedir`로 포함합니다.
-- 공식 Wireshark 4.6.8 x64 MSI에서 TShark 런타임을 구성합니다.
-- 빌드 서버에서만 정확한 공식 URL·SHA-256·Authenticode 서명을 확인합니다.
-- 사용자 PC에서는 다운로드·설치·외부 통신 없이 실행해야 합니다.
-- 실제 장애 Finding과 상태 머신은 이후 단계로 남깁니다.
+- 저장된 로컬 PCAP·PCAPNG에 내장 TShark를 연결합니다.
+- 승인된 최소 프레임 메타데이터만 추출합니다.
+- 프로토콜별 존재 프레임을 초급자용 한국어로 표시합니다.
+- 실제 성공·실패 상관분석과 장애 Finding은 다음 단계로 남깁니다.
+- 가짜 패킷 결과, 임시 성공값과 추정 장애 원인을 만들지 않습니다.
 
-## 런타임 금지사항
+## 기술과 런타임 금지사항
 
-AI, LLM, Ollama, MCP, 외부 API, HTTP 요청, 소켓, DNS 조회, 텔레메트리, 오류 자동 전송, 자동 업데이트, 온라인 버전 확인, 수신 포트, HTTP 서버, 원격 제어, API 키·토큰·URL 설정을 제품 런타임에 추가하지 않습니다.
+- Python 3.13 표준 라이브러리와 `tkinter/ttk`만 런타임에 사용합니다.
+- AI, LLM, Ollama, MCP, 외부 API, HTTP 요청, 소켓, DNS 조회, 텔레메트리, 오류 자동 전송, 자동 업데이트, 온라인 버전 확인, 수신 포트, HTTP 서버, 원격 제어, API 키·토큰·URL 설정을 추가하지 않습니다.
+- 네트워크·AI Import, 외부 URL, `eval`, `exec`, `shell=True`를 정적 감사로 차단합니다.
+- GitHub Actions의 공급망 다운로드는 제품 런타임과 분리하며 다운로드 코드를 앱에 넣지 않습니다.
 
-Python 런타임 소스에서 네트워크·AI Import, 외부 URL, `eval`, `exec`, `shell=True`를 정적 감사로 차단합니다. GitHub Actions의 빌드 다운로드는 제품 런타임과 분리하며 다운로드 코드를 애플리케이션 패키지에 넣지 않습니다.
+## TShark 실행 경계
 
-## Portable 공급망
-
-- Python 3.13, PyInstaller 6.22.2, Wireshark 4.6.8을 고정합니다.
-- 공식 Wireshark MSI와 소스 아카이브의 정확한 URL과 SHA-256만 사용합니다.
-- MSI와 추출된 `tshark.exe`의 Authenticode 서명자를 확인합니다.
-- 시스템 TShark, 레지스트리, `PATH` 실행 파일로 대체하지 않습니다.
-- `tshark.exe` 이외 Wireshark 실행 파일, Npcap, extcap, GUI, 실시간 캡처 도구를 최종 패키지에서 제거합니다.
-- TShark 전체 파일의 크기·SHA-256을 `manifest.json`에 기록합니다.
-- Python·Tcl·Tk·PyInstaller·Wireshark 라이선스 파일을 Portable ZIP에 포함합니다.
-- 정확한 Wireshark 소스 아카이브와 SHA-256을 릴리즈 자산으로 제공합니다.
+- `vendor/wireshark/`의 고정 매니페스트 TShark만 사용합니다.
+- 시스템 설치본, 레지스트리와 PATH 실행 파일로 대체하지 않습니다.
+- 실행 파일과 모든 종속 파일의 크기·SHA-256을 실행 전후 확인합니다.
+- 자식 프로세스 생성은 `tshark/runner.py`의 검토된 단일 함수만 허용합니다.
+- `shell=False`, stdin 비활성화, Windows 콘솔 숨김을 고정합니다.
+- 이름 해석 비활성화 `-n`, 저장 파일 `-r`, 패킷 상한 `-c`, 고정 fields 출력만 허용합니다.
+- 실시간 `-i`, rpcap, TCP@호스트, 임의 extcap·Lua·필터·필드·사용자 옵션을 금지합니다.
+- stdout과 stderr를 동시에 읽고 크기·시간 상한을 적용합니다.
+- stderr 원문은 저장·표시하지 않습니다.
+- 호출마다 빈 config·plugin·extcap·data·temp 경로를 만들고 종료 후 무잔류를 확인합니다.
 
 ## 데이터와 판정 안전성
 
-- 입력은 확장자·매직·구조·정규 파일·링크 여부를 함께 검사합니다.
-- 원본 캡처는 수정하거나 자동 삭제하지 않습니다.
-- 로그와 GUI에 Raw Payload, 자격 증명, 파일명 원문, 전체 IP·MAC, 절대경로, TShark 표준 오류 원문을 남기지 않습니다.
+- 입력 캡처는 확장자·매직·구조·정규 파일·링크 여부·SHA-256을 검사합니다.
+- TShark 실행 전후 캡처의 형식·크기·SHA-256이 달라지면 실패합니다.
+- 원본 캡처를 수정하거나 자동 삭제하지 않습니다.
+- 로그·GUI·기본 JSON에 Raw Payload, 자격 증명, 파일명 원문, 절대경로, 전체 IP·MAC, SSID, 사용자명과 DNS 질의명을 남기지 않습니다.
 - 실제 사내 캡처·프로파일·사용자 정보·장비 설정·로그·보고서를 커밋하지 않습니다.
-- 프로토콜 존재·미관찰을 성공·실패 증거로 사용하지 않습니다.
+- 테스트는 런타임 생성 합성 PCAP·PCAPNG·JSON·TSV만 사용합니다.
+- 프로토콜 존재는 성공·실패를 의미하지 않으며 미관찰도 장애 증거가 아닙니다.
 - 패킷 부재를 장애로 해석하지 않습니다.
 - TCP 재전송만으로 RF 장애를 확정하지 않습니다.
 - Radiotap이 없으면 RSSI·SNR·채널·무선 Retry를 판단하지 않습니다.
-- RADIUS 패킷이 없으면 ClearPass 장애를 확정하지 않습니다.
+- RADIUS가 없으면 ClearPass 장애를 확정하지 않습니다.
 - 근거가 부족하면 `판단 불가`가 우선입니다.
 
 ## 검증과 릴리즈
 
-변경 후 Windows에서 바이트코드 컴파일, 전체 테스트, 비대화형 자체 점검, 소스 감사, 저장소 감사, Portable 빌드, Python PATH 없는 EXE 자체 점검, TShark 매니페스트·버전·필드 카탈로그 검증을 수행합니다.
+변경 후 Windows에서 바이트코드 컴파일, 전체 테스트, 자체 점검, 소스 감사, 저장소 감사, Portable 빌드와 실제 내장 TShark 통합 검증을 수행합니다.
 
-`v0.3.0-alpha.1`은 실행 가능한 Win64 Portable 프리릴리즈이지만 실제 WLAN 장애 원인 판정 완성판으로 표현하지 않습니다. 애플리케이션 코드 서명 인증서가 없음을 명시합니다.
+Portable 통합 검증은 Python PATH 없이 EXE를 실행하고 임시 ARP·DNS PCAP에서 두 프로토콜이 관찰되는지 확인해야 합니다. 결과에 캡처 경로·파일명·패킷 IP가 없고 배포 폴더가 변경되지 않아야 합니다.
 
-외부 소스·테스트·문장·이미지·자산을 복사하지 않습니다. 제3자 구성요소를 변경하면 `THIRD_PARTY_NOTICES.md`, 공급망 고정값, 대응 소스와 라이선스를 먼저 갱신합니다.
+`v0.4.0-alpha.1`은 프로토콜 존재 인벤토리 프리릴리즈입니다. 장애 원인 분석 완성판으로 표현하지 않으며 애플리케이션 상용 코드 서명이 없음을 명시합니다.
+
+외부 프로젝트의 소스·테스트·문장·이미지·자산을 복사하지 않습니다. 제3자 구성요소가 바뀌면 `THIRD_PARTY_NOTICES.md`, 공급망 고정값, 대응 소스와 라이선스를 먼저 갱신합니다.

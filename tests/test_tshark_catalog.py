@@ -34,6 +34,13 @@ class TSharkCatalogTests(unittest.TestCase):
             / "field-profiles.v1.json"
         )
 
+    def resolved_profile(self):
+        return resolve_profile(
+            load_field_profiles(self.registry_path()),
+            parse_field_catalog(CATALOG_LINES),
+            "protocol-inventory",
+        )
+
     def test_catalog_and_profile_resolve_deterministically(self):
         catalog = parse_field_catalog(CATALOG_LINES)
         registry = load_field_profiles(self.registry_path())
@@ -67,12 +74,23 @@ class TSharkCatalogTests(unittest.TestCase):
                 "protocol-inventory",
             )
 
-    def test_catalog_rejects_conflicting_duplicate_and_unknown_record(self):
-        with self.assertRaises(FieldCatalogError):
-            parse_field_catalog(
-                CATALOG_LINES
-                + ["F\tDifferent\tframe.number\tFT_STRING\tframe\t\t0x0\t\n"]
-            )
+    def test_catalog_normalizes_reused_abbreviations_and_rejects_unknown_record(self):
+        aliases = CATALOG_LINES + [
+            "P\tAlternate Frame Description\tframe\n",
+            "F\tAlternate Frame Number\tframe.number\tFT_STRING\tframe\t\t0x0\t\n",
+        ]
+        forward = parse_field_catalog(aliases)
+        reverse = parse_field_catalog(reversed(aliases))
+
+        self.assertEqual(forward.protocols, reverse.protocols)
+        self.assertEqual(forward.fields, reverse.fields)
+        self.assertEqual(
+            [item.abbreviation for item in forward.protocols].count("frame"),
+            1,
+        )
+        self.assertEqual(forward.field_names().count("frame.number"), 1)
+        self.assertTrue(forward.has_field("frame.number"))
+
         with self.assertRaises(FieldCatalogError):
             parse_field_catalog(CATALOG_LINES + ["X\tunknown\n"])
 
@@ -100,15 +118,51 @@ class TSharkCatalogTests(unittest.TestCase):
             with self.assertRaises(FieldProfileError):
                 load_field_profiles(duplicate)
 
-    def test_fields_output_parses_quoted_tsv_and_rejects_wrong_header(self):
-        catalog = parse_field_catalog(CATALOG_LINES)
-        registry = load_field_profiles(self.registry_path())
-        profile = resolve_profile(registry, catalog, "protocol-inventory")
-        header = "\t".join('"{0}"'.format(item) for item in profile.headers())
-        row = '"1"\t"0"\t"100"\t"100"\t"eth:ip:udp:dns"'
-        self.assertEqual(len(list(iter_fields_rows(header + "\n" + row + "\n", profile))), 1)
+    def test_fields_output_accepts_quoted_unquoted_and_mixed_cells(self):
+        profile = self.resolved_profile()
+        quoted_header = "\t".join('"{0}"'.format(item) for item in profile.headers())
+        quoted_row = '"1"\t"0"\t"100"\t"100"\t"eth:ip:udp:dns"'
+        self.assertEqual(
+            list(iter_fields_rows(quoted_header + "\n" + quoted_row + "\n", profile)),
+            [("1", "0", "100", "100", "eth:ip:udp:dns")],
+        )
+
+        plain_header = "\t".join(profile.headers())
+        plain_row = "1\t0\t100\t100\teth:ip:udp:dns"
+        self.assertEqual(
+            list(iter_fields_rows(plain_header + "\n" + plain_row + "\n", profile)),
+            [("1", "0", "100", "100", "eth:ip:udp:dns")],
+        )
+
+        mixed_header = (
+            '"frame.number"\tframe.interface_id\t"frame.cap_len"\t'
+            'frame.len\t"frame.protocols"'
+        )
+        mixed_row = '"1"\t\t"100"\t100\teth:arp'
+        self.assertEqual(
+            list(iter_fields_rows(mixed_header + "\n" + mixed_row + "\n", profile)),
+            [("1", "", "100", "100", "eth:arp")],
+        )
+
+    def test_fields_output_rejects_ambiguous_quotes_and_wrong_header(self):
+        profile = self.resolved_profile()
+        header = "\t".join(profile.headers())
         with self.assertRaises(FieldsOutputError):
-            list(iter_fields_rows('"frame.protocols"\n"dns"\n', profile))
+            list(
+                iter_fields_rows(
+                    header + '\n1\t0\t100\t100\teth:"dns"\n',
+                    profile,
+                )
+            )
+        with self.assertRaises(FieldsOutputError):
+            list(
+                iter_fields_rows(
+                    header + '\n"1"x\t0\t100\t100\teth:dns\n',
+                    profile,
+                )
+            )
+        with self.assertRaises(FieldsOutputError):
+            list(iter_fields_rows('frame.protocols\ndns\n', profile))
 
 
 if __name__ == "__main__":

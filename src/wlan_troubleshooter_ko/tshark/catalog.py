@@ -55,13 +55,52 @@ def _clean_line(raw: str, first: bool) -> str:
     return line
 
 
+def _protocol_sort_key(item: RegisteredProtocol) -> Tuple[str, ...]:
+    return (
+        item.abbreviation.casefold(),
+        item.abbreviation,
+        item.name.casefold(),
+        item.name,
+    )
+
+
+def _field_sort_key(item: RegisteredField) -> Tuple[str, ...]:
+    return (
+        item.abbreviation.casefold(),
+        item.abbreviation,
+        item.parent_protocol.casefold(),
+        item.parent_protocol,
+        item.field_type.casefold(),
+        item.field_type,
+        item.name.casefold(),
+        item.name,
+        item.display_base,
+        item.bitmask,
+        item.blurb,
+    )
+
+
+def _keep_canonical(mapping, key: str, item, sort_key) -> None:
+    """같은 약어의 여러 공식 등록 중 입력 순서와 무관한 대표값을 유지한다."""
+
+    previous = mapping.get(key)
+    if previous is None or sort_key(item) < sort_key(previous):
+        mapping[key] = item
+
+
 def parse_field_catalog(
     lines: Iterable[str],
     *,
-    max_records: int = 250_000,
+    max_records: int = 500_000,
     max_characters: int = 64 * 1024 * 1024,
 ) -> FieldCatalog:
-    """공식 P·F 탭 레코드를 정규화하고 중복 충돌을 거부한다."""
+    """공식 P·F 탭 레코드를 정규화하고 손상된 형식은 거부한다.
+
+    Wireshark 등록 데이터베이스는 같은 프로토콜 또는 필드 약어를 서로
+    다른 설명·형식으로 여러 번 노출할 수 있다. Phase 4A는 약어의 존재
+    여부만 사용하므로 이를 손상으로 간주하지 않고, 약어별 대표 레코드를
+    정렬 키로 선택해 입력 순서와 무관한 결과를 만든다.
+    """
 
     if not 1 <= max_records <= 1_000_000:
         raise FieldCatalogError("필드 카탈로그 레코드 제한이 올바르지 않습니다.")
@@ -89,10 +128,7 @@ def parse_field_catalog(
             if len(parts) < 3 or not parts[1] or not parts[2]:
                 raise FieldCatalogError("프로토콜 카탈로그 행이 올바르지 않습니다.")
             item = RegisteredProtocol(parts[1], parts[2])
-            previous = protocols.get(item.abbreviation)
-            if previous is not None and previous != item:
-                raise FieldCatalogError("프로토콜 약어가 서로 다른 내용으로 중복됐습니다.")
-            protocols[item.abbreviation] = item
+            _keep_canonical(protocols, item.abbreviation, item, _protocol_sort_key)
         elif parts[0] == "F":
             if len(parts) < 7 or not parts[1] or not parts[2] or not parts[3] or not parts[4]:
                 raise FieldCatalogError("필드 카탈로그 행이 올바르지 않습니다.")
@@ -105,18 +141,15 @@ def parse_field_catalog(
                 bitmask=parts[6],
                 blurb="\t".join(parts[7:]) if len(parts) > 7 else "",
             )
-            previous = fields.get(item.abbreviation)
-            if previous is not None and previous != item:
-                raise FieldCatalogError("필드 약어가 서로 다른 내용으로 중복됐습니다.")
-            fields[item.abbreviation] = item
+            _keep_canonical(fields, item.abbreviation, item, _field_sort_key)
         else:
             raise FieldCatalogError("알 수 없는 필드 카탈로그 레코드입니다.")
 
     if not protocols or not fields:
         raise FieldCatalogError("필드 카탈로그에 프로토콜 또는 필드가 없습니다.")
     return FieldCatalog(
-        protocols=tuple(protocols[key] for key in sorted(protocols)),
-        fields=tuple(fields[key] for key in sorted(fields)),
+        protocols=tuple(protocols[key] for key in sorted(protocols, key=str.casefold)),
+        fields=tuple(fields[key] for key in sorted(fields, key=str.casefold)),
         records_scanned=records,
         characters_scanned=characters,
     )
