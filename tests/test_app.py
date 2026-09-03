@@ -16,10 +16,13 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "2A")
+        self.assertEqual(result["phase"], "2B")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
-        self.assertIn("Link Type", result["analysis_features"])
+        self.assertEqual(result["field_profile_version"], "0.2.0")
+        self.assertEqual(result["inventory_field_count"], "5")
+        self.assertEqual(result["protocol_group_count"], "12")
+        self.assertIn("프로토콜 인벤토리", result["analysis_features"])
 
     def test_view_model_does_not_need_tk_root(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -31,7 +34,7 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertTrue(state.valid)
             self.assertIn("캡처 유형 추정", state.detail)
-            self.assertIn("프로토콜별 장애 판정", state.detail)
+            self.assertIn("프로토콜 존재 인벤토리", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)

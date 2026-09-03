@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "profile_version": "0.2.0",
+  "profiles": [
+    {
+      "profile_id": "protocol-inventory",
+      "display_filter_name": "capture-overview",
+      "max_packets": 200000,
+      "fields": [
+        {
+          "output_key": "frame_number",
+          "candidates": ["frame.number"],
+          "required": true
+        },
+        {
+          "output_key": "interface_id",
+          "candidates": ["frame.interface_id"],
+          "required": false
+        },
+        {
+          "output_key": "captured_length",
+          "candidates": ["frame.cap_len"],
+          "required": true
+        },
+        {
+          "output_key": "frame_length",
+          "candidates": ["frame.len"],
+          "required": true
+        },
+        {
+          "output_key": "protocols",
+          "candidates": ["frame.protocols"],
+          "required": true
+        }
+      ]
+    }
+  ],
+  "protocol_groups": [
+    {
+      "group_id": "radiotap",
+      "label_ko": "Radiotap 무선 메타데이터",
+      "tokens": ["radiotap"]
+    },
+    {
+      "group_id": "wlan",
+      "label_ko": "IEEE 802.11 무선 LAN",
+      "tokens": ["wlan", "wlan_radio"]
+    },
+    {
+      "group_id": "eapol",
+      "label_ko": "EAPOL 및 키 교환",
+      "tokens": ["eapol", "wlan_rsna_eapol"]
+    },
+    {
+      "group_id": "eap",
+      "label_ko": "EAP 인증",
+      "tokens": ["eap"]
+    },
+    {
+      "group_id": "radius",
+      "label_ko": "RADIUS 인증",
+      "tokens": ["radius"]
+    },
+    {
+      "group_id": "dhcp",
+      "label_ko": "DHCP 주소 할당",
+      "tokens": ["dhcp", "bootp"]
+    },
+    {
+      "group_id": "dns",
+      "label_ko": "DNS 이름 조회",
+      "tokens": ["dns"]
+    },
+    {
+      "group_id": "arp",
+      "label_ko": "ARP 주소 확인",
+      "tokens": ["arp"]
+    },
+    {
+      "group_id": "tcp",
+      "label_ko": "TCP 연결",
+      "tokens": ["tcp"]
+    },
+    {
+      "group_id": "tls",
+      "label_ko": "TLS 암호화 연결",
+      "tokens": ["tls", "ssl"]
+    },
+    {
+      "group_id": "icmp",
+      "label_ko": "ICMP 연결 확인",
+      "tokens": ["icmp", "icmpv6"]
+    },
+    {
+      "group_id": "quic",
+      "label_ko": "QUIC 연결",
+      "tokens": ["quic"]
+    }
+  ]
+}
