@@ -220,6 +220,22 @@ class Phase4RuntimeTests(unittest.TestCase):
         )
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
+    def test_corrupted_bundle_is_reported_without_execution(self, popen):
+        root, vendor, capture, _workspace = self.setup_paths()
+        (vendor / "tshark.exe").write_bytes(b"changed")
+
+        result = analyze_capture(
+            capture,
+            vendor,
+            self.profile_path(),
+            workspace_base=root,
+        )
+
+        self.assertEqual(result.inventory_state, "failed")
+        self.assertIn("누락되었거나 변경", result.inventory_message)
+        popen.assert_not_called()
+
+    @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
     def test_cancelled_before_start_does_not_create_process(self, popen):
         root, vendor, _capture, _workspace = self.setup_paths()
         cancel = threading.Event()

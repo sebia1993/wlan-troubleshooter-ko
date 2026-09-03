@@ -93,6 +93,25 @@ def _safe_inventory_failure(exc: Exception) -> str:
     return "프로토콜 존재 인벤토리를 안전하게 완료하지 못했습니다."
 
 
+def _without_inventory(
+    capture: CaptureInfo,
+    structure: CaptureStructure,
+    capabilities: CaptureCapabilityReport,
+    state: str,
+    message: str,
+) -> CaptureAnalysisResult:
+    return CaptureAnalysisResult(
+        capture_format=capture.capture_format,
+        size_bytes=capture.size_bytes,
+        sha256_prefix=capture.sha256[:12],
+        structure=structure,
+        capabilities=capabilities,
+        inventory_state=state,
+        inventory_message=message,
+        protocol_inventory=None,
+    )
+
+
 def analyze_capture(
     capture_path: PathLike,
     vendor_root: Path,
@@ -116,19 +135,21 @@ def analyze_capture(
         ) from None
 
     bundle_status = inspect_bundle(vendor_root)
+    if bundle_status.code == "not_provisioned":
+        return _without_inventory(
+            capture,
+            structure,
+            capabilities,
+            "unavailable",
+            "내장 TShark가 포함되지 않은 소스 실행 모드라 프로토콜 존재 인벤토리를 실행하지 않았습니다.",
+        )
     if bundle_status.code != "integrity_verified":
-        return CaptureAnalysisResult(
-            capture_format=capture.capture_format,
-            size_bytes=capture.size_bytes,
-            sha256_prefix=capture.sha256[:12],
-            structure=structure,
-            capabilities=capabilities,
-            inventory_state="unavailable",
-            inventory_message=(
-                "내장 TShark가 준비되지 않아 프로토콜 존재 인벤토리를 "
-                "실행하지 않았습니다."
-            ),
-            protocol_inventory=None,
+        return _without_inventory(
+            capture,
+            structure,
+            capabilities,
+            "failed",
+            "내장 TShark 파일이 누락되었거나 변경되었습니다. 배포 ZIP을 다시 압축 해제해 주세요.",
         )
 
     expected_frames = structure.packets_scanned if structure.scan_complete else None
@@ -144,15 +165,12 @@ def analyze_capture(
                 cancel_event=cancel_event,
             )
     except Exception as exc:
-        return CaptureAnalysisResult(
-            capture_format=capture.capture_format,
-            size_bytes=capture.size_bytes,
-            sha256_prefix=capture.sha256[:12],
-            structure=structure,
-            capabilities=capabilities,
-            inventory_state="failed",
-            inventory_message=_safe_inventory_failure(exc),
-            protocol_inventory=None,
+        return _without_inventory(
+            capture,
+            structure,
+            capabilities,
+            "failed",
+            _safe_inventory_failure(exc),
         )
 
     return CaptureAnalysisResult(
