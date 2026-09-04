@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  phase-0-4f-validation:
-    name: Phase 0-4F offline validation
+  phase-0-4g-validation:
+    name: Phase 0-4G offline validation
     runs-on: windows-latest
     timeout-minutes: 30
     env:

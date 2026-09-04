@@ -1,4 +1,4 @@
-"""캡처 사전 점검, Finding, 거래 시도, 단말 가명과 여정을 조정한다."""
+"""캡처 사전 점검부터 단말 여정·관찰 가능성까지 조정한다."""
 
 from __future__ import annotations
 
@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+from wlan_troubleshooter_ko.analysis.capture_observability import (
+    CaptureObservabilityError,
+    CaptureObservabilityReport,
+    build_capture_observability,
+)
 from wlan_troubleshooter_ko.analysis.device_journeys import DeviceJourneyError
 from wlan_troubleshooter_ko.analysis.device_sessions import DeviceSessionError
 from wlan_troubleshooter_ko.analysis.event_correlation import EventCorrelationError
@@ -62,6 +67,7 @@ class CaptureAnalysisResult:
     inventory_state: str
     inventory_message: str
     protocol_inventory: Optional[ProtocolInventoryRun]
+    capture_observability: Optional[CaptureObservabilityReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -80,6 +86,11 @@ class CaptureAnalysisResult:
                 if self.protocol_inventory is None
                 else self.protocol_inventory.to_dict()
             ),
+            "capture_observability": (
+                None
+                if self.capture_observability is None
+                else self.capture_observability.to_dict()
+            ),
         }
 
 
@@ -94,6 +105,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             TransactionSessionError,
             DeviceSessionError,
             DeviceJourneyError,
+            CaptureObservabilityError,
         ),
     ):
         return str(exc)
@@ -114,7 +126,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             "배포 ZIP을 다시 압축 해제해 주세요."
         )
     return (
-        "접속 단계·이벤트 타임라인·거래 시도·단말 가명·관찰 여정을 "
+        "접속 단계·이벤트·거래·단말 여정·캡처 관찰 가능성을 "
         "안전하게 완료하지 못했습니다."
     )
 
@@ -135,6 +147,7 @@ def _without_inventory(
         inventory_state=state,
         inventory_message=message,
         protocol_inventory=None,
+        capture_observability=None,
     )
 
 
@@ -148,11 +161,17 @@ def analyze_capture(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> CaptureAnalysisResult:
-    """내장 TShark로 Finding, 거래 시도, 단말 가명과 관찰 여정을 분석한다."""
+    """내장 TShark로 Finding, 단말 여정과 관찰 가능성을 분석한다."""
 
     try:
-        capture: CaptureInfo = validate_capture(capture_path, cancel_event=cancel_event)
-        structure = inspect_capture_structure(capture, cancel_event=cancel_event)
+        capture: CaptureInfo = validate_capture(
+            capture_path,
+            cancel_event=cancel_event,
+        )
+        structure = inspect_capture_structure(
+            capture,
+            cancel_event=cancel_event,
+        )
         capabilities = classify_capture_capabilities(structure)
     except (CaptureValidationError, CaptureStructureError) as exc:
         raise CaptureAnalysisError(str(exc)) from exc
@@ -198,7 +217,9 @@ def analyze_capture(
             str(exc),
         )
 
-    expected_frames = structure.packets_scanned if structure.scan_complete else None
+    expected_frames = (
+        structure.packets_scanned if structure.scan_complete else None
+    )
     try:
         with AnalysisWorkspace(base_directory=workspace_base) as workspace:
             inventory_run = run_connection_analysis(
@@ -213,6 +234,18 @@ def analyze_capture(
                 timeout_seconds=timeout_seconds,
                 cancel_event=cancel_event,
             )
+        if (
+            inventory_run.event_timeline is None
+            or inventory_run.transaction_sessions is None
+        ):
+            raise CaptureObservabilityError(
+                "캡처 관찰 가능성에 필요한 이벤트·거래 결과가 없습니다."
+            )
+        observability = build_capture_observability(
+            structure,
+            inventory_run.event_timeline,
+            inventory_run.transaction_sessions,
+        )
     except Exception as exc:
         return _without_inventory(
             capture,
@@ -231,8 +264,9 @@ def analyze_capture(
         inventory_state="completed",
         inventory_message=(
             "내장 TShark로 프로토콜 인벤토리, 접속 단계 Finding, "
-            "비식별 이벤트 타임라인, 거래 시도, 분석 실행별 단말 가명과 "
-            "단말 가명별 관찰 여정을 완료했습니다."
+            "비식별 이벤트·거래, 단말 가명·여정과 캡처 관찰 가능성 분석을 "
+            "완료했습니다."
         ),
         protocol_inventory=inventory_run,
+        capture_observability=observability,
     )

@@ -7,7 +7,10 @@ class DeviceJourneyFixtureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         support = Path(__file__).resolve().parents[1] / "tests" / "portable_build"
-        cls.shared = cls._load("shared_event_fixture", support / "generate_event_fixture.py")
+        cls.shared = cls._load(
+            "shared_event_fixture",
+            support / "generate_event_fixture.py",
+        )
         cls.journey = cls._load(
             "device_journey_fixture",
             support / "generate_device_journey_fixture.py",
@@ -40,7 +43,7 @@ class DeviceJourneyFixtureTests(unittest.TestCase):
         self.assertEqual(journey[6][12:], shared[6][12:])
         self.assertEqual(journey[7][12:], shared[7][12:])
 
-    def test_fixture_is_deterministic_and_contains_no_real_capture(self):
+    def test_fixture_is_deterministic_and_not_committed_as_pcap(self):
         first = self.journey.build_pcap()
         second = self.journey.build_pcap()
         self.assertEqual(first, second)

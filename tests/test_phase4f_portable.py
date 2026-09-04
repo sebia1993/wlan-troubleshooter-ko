@@ -11,7 +11,7 @@ class Phase4FPortableTests(unittest.TestCase):
     def text(self, relative):
         return (self.root / relative).read_text(encoding="utf-8")
 
-    def test_workflows_require_device_journey_integration_gate(self):
+    def test_workflows_preserve_device_journey_integration_gate(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -21,7 +21,7 @@ class Phase4FPortableTests(unittest.TestCase):
                 self.assertIn("verify_device_sessions.ps1", workflow)
                 self.assertIn("verify_device_journeys.ps1", workflow)
 
-    def test_finalizer_enables_journey_runtime_and_disables_persistence(self):
+    def test_finalizer_preserves_journey_runtime_and_privacy_flags(self):
         finalizer = self.text("tests/portable_build/finalize_portable.ps1")
         for value in (
             'device_session_runtime = "enabled"',
@@ -32,13 +32,13 @@ class Phase4FPortableTests(unittest.TestCase):
         ):
             self.assertIn(value, finalizer)
 
-    def test_journey_verifier_checks_conservative_privacy_boundaries(self):
+    def test_journey_verifier_checks_real_ethernet_scope_and_separate_radius_nad(self):
         verifier = self.text("tests/portable_build/verify_device_journeys.ps1")
         for value in (
+            "generate_device_journey_fixture.py",
             "device_journeys",
             "DEVICE-1",
             '"mixed"',
-            '"eap"',
             '"dhcp"',
             '"dns"',
             '"tcp"',
@@ -52,18 +52,31 @@ class Phase4FPortableTests(unittest.TestCase):
             "display_filter",
         ):
             self.assertIn(value, verifier)
+        self.assertNotIn(
+            'Get-Stage -Journey $Journey -Protocol "eap"',
+            verifier,
+        )
+        self.assertNotIn(
+            'Get-Stage -Journey $Journey -Protocol "radius"',
+            verifier,
+        )
 
-    def test_phase4f_release_metadata_is_exact(self):
-        project = self.text("pyproject.toml")
+    def test_device_journey_fixture_changes_only_radius_l2_headers(self):
+        fixture = self.text(
+            "tests/portable_build/generate_device_journey_fixture.py"
+        )
         for value in (
-            'version = "0.9.0a1"',
-            'phase = "4F"',
-            'device-journey-version = "1"',
-            'release-tag = "v0.9.0-alpha.1"',
+            "generate_event_fixture.py",
+            "NAD_MAC",
+            "timestamp == 6",
+            "timestamp == 7",
+            "build_pcap",
         ):
-            self.assertIn(value, project)
-        release = self.text(".github/workflows/preview-release.yml")
-        self.assertIn('if ($Tag -ne "v0.9.0-alpha.1"', release)
+            self.assertIn(value, fixture)
+
+    def test_device_journey_schema_version_remains_available(self):
+        project = self.text("pyproject.toml")
+        self.assertIn('device-journey-version = "1"', project)
 
     def test_no_capture_fixture_is_committed(self):
         self.assertFalse(any(self.root.rglob("*.pcap")))

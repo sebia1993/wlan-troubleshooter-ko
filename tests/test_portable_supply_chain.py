@@ -1,5 +1,4 @@
 import json
-import re
 import unittest
 from pathlib import Path
 
@@ -79,6 +78,8 @@ class PortableSupplyChainTests(unittest.TestCase):
             "verify_event_timeline.ps1",
             "verify_transaction_sessions.ps1",
             "verify_device_sessions.ps1",
+            "verify_device_journeys.ps1",
+            "verify_capture_observability.ps1",
         ):
             text = (self.support / filename).read_text(encoding="utf-8")
             parameter_block = text.split(")", 1)[0]
@@ -109,6 +110,8 @@ class PortableSupplyChainTests(unittest.TestCase):
             "event_timeline_runtime",
             "transaction_session_runtime",
             "device_session_runtime",
+            "device_journey_runtime",
+            "capture_observability_runtime",
             "raw_identifier_serialization",
             "alias_secret_persistence",
             "cross_run_alias_stability",
@@ -116,15 +119,21 @@ class PortableSupplyChainTests(unittest.TestCase):
             self.assertIn(value, text)
 
     def test_portable_workflows_run_all_real_analysis_and_privacy_gates(self):
+        required = (
+            "verify_protocol_inventory.ps1",
+            "verify_event_timeline.ps1",
+            "verify_transaction_sessions.ps1",
+            "verify_device_sessions.ps1",
+            "verify_device_journeys.ps1",
+            "verify_capture_observability.ps1",
+        )
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
         ):
             text = (self.root / relative).read_text(encoding="utf-8")
-            self.assertIn("verify_protocol_inventory.ps1", text)
-            self.assertIn("verify_event_timeline.ps1", text)
-            self.assertIn("verify_transaction_sessions.ps1", text)
-            self.assertIn("verify_device_sessions.ps1", text)
+            for value in required:
+                self.assertIn(value, text)
 
         finding_verifier = (
             self.support / "verify_protocol_inventory.ps1"
@@ -205,6 +214,42 @@ class PortableSupplyChainTests(unittest.TestCase):
         ):
             self.assertIn(value, device_verifier)
 
+        journey_verifier = (
+            self.support / "verify_device_journeys.ps1"
+        ).read_text(encoding="utf-8")
+        for value in (
+            "device_journeys",
+            "DEVICE-1",
+            '"dhcp"',
+            '"dns"',
+            '"tcp"',
+            "first_failure_stage",
+            "last_positive_stage",
+            "cross_protocol_session_confirmed",
+            "root_cause_confirmed",
+        ):
+            self.assertIn(value, journey_verifier)
+
+        observability_verifier = (
+            self.support / "verify_capture_observability.ps1"
+        ).read_text(encoding="utf-8")
+        for value in (
+            "generate_observability_fixture.py",
+            "capture_observability_runtime",
+            "capture_observability",
+            "DNS-1-A1",
+            "DNS-2-A1",
+            "response-not-observed",
+            "capture-boundary-risk",
+            "capture-end-boundary-risk",
+            "capture_start_proven",
+            "capture_end_proven",
+            "capture_loss_excluded",
+            "directionality_proven",
+            "absence_can_confirm_failure",
+        ):
+            self.assertIn(value, observability_verifier)
+
     def test_event_fixtures_are_generated_at_runtime_not_committed(self):
         ethernet = (self.support / "generate_event_fixture.py").read_text(
             encoding="utf-8"
@@ -215,6 +260,9 @@ class PortableSupplyChainTests(unittest.TestCase):
         eap = (self.support / "generate_eap_fixture.py").read_text(
             encoding="utf-8"
         )
+        observability = (
+            self.support / "generate_observability_fixture.py"
+        ).read_text(encoding="utf-8")
         for value in (
             "build_pcap",
             "_eapol",
@@ -239,6 +287,12 @@ class PortableSupplyChainTests(unittest.TestCase):
             "_ppp_eap",
         ):
             self.assertIn(value, eap)
+        for value in (
+            "build_pcap",
+            "_dns_query",
+            "observability",
+        ):
+            self.assertIn(value, observability)
         self.assertFalse(any(self.root.rglob("*.pcap")))
         self.assertFalse(any(self.root.rglob("*.pcapng")))
 

@@ -1,5 +1,12 @@
-"""결정론적 캡처 점검, 거래 시도, 단말 가명과 관찰 여정."""
+"""결정론적 캡처 점검부터 단말 여정·관찰 가능성까지의 공개 API."""
 
+from wlan_troubleshooter_ko.analysis.capture_observability import (
+    CaptureObservabilityError,
+    CaptureObservabilityReport,
+    IncompleteAttemptAssessment,
+    ProtocolVisibility,
+    build_capture_observability,
+)
 from wlan_troubleshooter_ko.analysis import device_journeys as _device_journeys
 from wlan_troubleshooter_ko.analysis.device_journey_normalizer import (
     wrap_device_journey_builder,
@@ -70,6 +77,8 @@ __all__ = [
     "CaptureAnalysisError",
     "CaptureAnalysisResult",
     "CaptureCapabilityReport",
+    "CaptureObservabilityError",
+    "CaptureObservabilityReport",
     "CaptureStructure",
     "CaptureStructureError",
     "DeviceAttemptLink",
@@ -86,17 +95,20 @@ __all__ = [
     "EventTimeline",
     "EventTimelineError",
     "EventTypeSummary",
+    "IncompleteAttemptAssessment",
     "InterfaceSummary",
     "ProtocolEvent",
     "ProtocolInventory",
     "ProtocolInventoryError",
     "ProtocolObservation",
+    "ProtocolVisibility",
     "StageAssessment",
     "StageSummary",
     "TransactionAttempt",
     "TransactionSessionError",
     "TransactionSessionReport",
     "analyze_capture",
+    "build_capture_observability",
     "build_device_journeys",
     "build_device_sessions",
     "build_event_correlation",

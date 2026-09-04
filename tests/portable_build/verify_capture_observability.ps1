@@ -28,26 +28,25 @@ function Assert-NoForbiddenText {
         [Parameter(Mandatory = $true)][string]$Raw,
         [Parameter(Mandatory = $true)][string[]]$Forbidden
     )
-
     foreach ($Value in $Forbidden) {
         if ($Raw.Contains($Value, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Device-journey result exposed a forbidden identifier."
+            throw "Capture-observability result exposed a forbidden identifier."
         }
     }
 }
 
-function Get-Stage {
+function Get-Attempt {
     param(
-        [Parameter(Mandatory = $true)]$Journey,
-        [Parameter(Mandatory = $true)][string]$Protocol
+        [Parameter(Mandatory = $true)]$Report,
+        [Parameter(Mandatory = $true)][string]$AttemptId
     )
-
-    $Stage = @($Journey.stages | Where-Object { $_.protocol -eq $Protocol }) |
-        Select-Object -First 1
-    if ($null -eq $Stage) {
-        throw "Expected device-journey stage was not observed: $Protocol"
+    $Value = @($Report.incomplete_attempts | Where-Object {
+        $_.attempt_id -eq $AttemptId
+    }) | Select-Object -First 1
+    if ($null -eq $Value) {
+        throw "Expected incomplete attempt is missing: $AttemptId"
     }
-    return $Stage
+    return $Value
 }
 
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
@@ -60,27 +59,27 @@ if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
     throw "Portable archive is missing."
 }
 
-$WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-device-journey-test-" + [guid]::NewGuid().ToString("N"))
+$WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-observability-test-" + [guid]::NewGuid().ToString("N"))
 $Expanded = Join-Path $WorkRoot "portable"
-$Capture = Join-Path $WorkRoot "private-device-journey.pcap"
-$Output = Join-Path $WorkRoot "device-journey.json"
+$Capture = Join-Path $WorkRoot "private-observability.pcap"
+$Output = Join-Path $WorkRoot "observability-result.json"
 New-Item -ItemType Directory -Path $Expanded -Force | Out-Null
+
 try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
     $BuildInfo = Get-Content -LiteralPath (Join-Path $Expanded "BUILD_INFO.json") -Raw | ConvertFrom-Json -Depth 32
     if (
-        $BuildInfo.device_session_runtime -ne "enabled" -or
-        $BuildInfo.device_journey_runtime -ne "enabled" -or
+        $BuildInfo.capture_observability_runtime -ne "enabled" -or
         $BuildInfo.raw_identifier_serialization -ne "disabled" -or
         $BuildInfo.alias_secret_persistence -ne "disabled" -or
         $BuildInfo.cross_run_alias_stability -ne "disabled"
     ) {
-        throw "Portable BUILD_INFO does not preserve the device-journey privacy boundary."
+        throw "Portable BUILD_INFO does not preserve the observability privacy boundary."
     }
 
-    & $PythonPath (Join-Path $PSScriptRoot "generate_device_journey_fixture.py") --output $Capture
+    & $PythonPath (Join-Path $PSScriptRoot "generate_observability_fixture.py") --output $Capture
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Capture -PathType Leaf)) {
-        throw "Synthetic device-journey fixture generation failed."
+        throw "Synthetic observability fixture generation failed."
     }
 
     $BeforeFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
@@ -101,7 +100,7 @@ try {
         )
         $Process = Start-Process -FilePath $Application -ArgumentList $Arguments -WorkingDirectory $Expanded -Wait -PassThru
         if ($Process.ExitCode -ne 0) {
-            throw "Portable device-journey analysis failed with exit code $($Process.ExitCode)."
+            throw "Portable capture-observability analysis failed with exit code $($Process.ExitCode)."
         }
     }
     finally {
@@ -111,100 +110,99 @@ try {
     }
 
     if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) {
-        throw "Portable device-journey analysis did not create its result."
+        throw "Portable capture-observability analysis did not create its result."
     }
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 160
     if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
-        throw "Portable device-journey analysis did not complete with schema version 2."
+        throw "Portable capture-observability analysis did not complete with schema version 2."
     }
 
-    $Report = $Result.protocol_inventory.device_journeys
+    $Report = $Result.capture_observability
     if (
         $null -eq $Report -or
         $Report.schema_version -ne 1 -or
-        $Report.journeys_total -ne 1 -or
-        $Report.source_complete -ne $true -or
-        $Report.linkage_complete -ne $false -or
-        $Report.complete -ne $false -or
-        [int]$Report.unassigned_attempts -lt 1 -or
-        $Report.raw_identifiers_serialized -ne $false -or
-        $Report.aliases_stable_across_runs -ne $false -or
-        $Report.device_identity_confirmed -ne $false -or
-        $Report.cross_protocol_session_confirmed -ne $false -or
-        $Report.root_cause_confirmed -ne $false
+        $Report.packets_scanned -ne 4 -or
+        $Report.frames_observed -ne 4 -or
+        $Report.analysis_input_complete -ne $true -or
+        $Report.container_scan_complete -ne $true -or
+        $Report.event_timeline_complete -ne $true -or
+        $Report.transaction_report_complete -ne $true -or
+        $Report.truncated_packets_observed -ne 0 -or
+        $Report.event_details_omitted -ne 0 -or
+        $Report.incomplete_attempts_total -ne 2 -or
+        $Report.capture_start_proven -ne $false -or
+        $Report.capture_end_proven -ne $false -or
+        $Report.capture_loss_excluded -ne $false -or
+        $Report.directionality_proven -ne $false -or
+        $Report.absence_can_confirm_failure -ne $false
     ) {
-        throw "Portable device-journey report is missing or violated its conservative linkage/privacy boundary."
+        throw "Portable capture-observability report has an unexpected conservative boundary."
     }
 
-    $Journey = @($Report.journeys)[0]
+    $DnsVisibility = @($Report.protocol_visibility | Where-Object {
+        $_.protocol -eq "dns"
+    }) | Select-Object -First 1
     if (
-        $Journey.device_alias -ne "DEVICE-1" -or
-        $Journey.state -ne "mixed" -or
-        $Journey.first_failure_stage -ne "tcp" -or
-        $Journey.last_positive_stage -ne "tcp" -or
-        $Journey.device_identity_confirmed -ne $false -or
-        $Journey.cross_protocol_session_confirmed -ne $false -or
-        $Journey.root_cause_confirmed -ne $false -or
-        [string]::IsNullOrWhiteSpace([string]$Journey.display_filter)
+        $null -eq $DnsVisibility -or
+        $DnsVisibility.request_event_observed -ne $true -or
+        $DnsVisibility.reply_event_observed -ne $false -or
+        $DnsVisibility.bidirectional_event_classes_observed -ne $false -or
+        $DnsVisibility.directionality_proven -ne $false
     ) {
-        throw "Portable DEVICE-1 journey has an unexpected conservative state."
+        throw "Portable DNS visibility summary is unexpected."
     }
 
-    $ObservedOrder = @($Journey.observed_stage_order)
-    foreach ($ExpectedProtocol in @("dhcp", "dns", "tcp")) {
-        if ($ObservedOrder -notcontains $ExpectedProtocol) {
-            throw "Portable DEVICE-1 journey is missing a stage: $ExpectedProtocol"
-        }
-    }
-    if ($ObservedOrder[0] -ne "dhcp" -or $ObservedOrder[-1] -ne "tcp") {
-        throw "Portable DEVICE-1 stage order does not follow observed packet order."
-    }
-    if ($ObservedOrder -contains "eap" -or $ObservedOrder -contains "radius") {
-        throw "A protocol without a decoded direct transaction was linked to DEVICE-1."
+    $Middle = Get-Attempt -Report $Report -AttemptId "DNS-1-A1"
+    if (
+        $Middle.assessment -ne "response-not-observed" -or
+        $Middle.first_frame -ne 2 -or
+        $Middle.last_frame -ne 2 -or
+        @($Middle.risk_flags).Count -ne 0 -or
+        $Middle.request_event_observed -ne $true -or
+        $Middle.reply_event_observed -ne $false -or
+        $Middle.absence_is_failure -ne $false -or
+        $Middle.capture_loss_excluded -ne $false -or
+        $Middle.directionality_proven -ne $false -or
+        [string]::IsNullOrWhiteSpace([string]$Middle.display_filter)
+    ) {
+        throw "Middle DNS query was not classified as response-not-observed."
     }
 
-    $DhcpStage = Get-Stage -Journey $Journey -Protocol "dhcp"
-    $DnsStage = Get-Stage -Journey $Journey -Protocol "dns"
-    $TcpStage = Get-Stage -Journey $Journey -Protocol "tcp"
+    $Boundary = Get-Attempt -Report $Report -AttemptId "DNS-2-A1"
     if (
-        $DhcpStage.state -ne "complete" -or
-        $DnsStage.state -ne "complete" -or
-        $TcpStage.state -ne "mixed"
+        $Boundary.assessment -ne "capture-boundary-risk" -or
+        $Boundary.first_frame -ne 4 -or
+        $Boundary.last_frame -ne 4 -or
+        @($Boundary.risk_flags) -notcontains "capture-end-boundary-risk" -or
+        $Boundary.absence_is_failure -ne $false
     ) {
-        throw "Portable DEVICE-1 stage aggregation is unexpected."
-    }
-    if (
-        @($TcpStage.attempt_ids).Count -lt 2 -or
-        @($Journey.evidence_frames).Count -lt 1
-    ) {
-        throw "Portable DEVICE-1 journey lacks transaction or frame evidence."
+        throw "Final-frame DNS query was not classified as a capture boundary risk."
     }
 
     Assert-NoForbiddenText -Raw $Raw -Forbidden @(
         $Capture,
         (Split-Path -Leaf $Capture),
         "192.0.2.10",
-        "198.51.100.10",
+        "192.0.2.53",
         "02:00:00:00:00:10",
-        "02:00:00:00:00:20",
-        "02:00:00:00:00:30",
+        "02:00:00:00:00:35",
         "020000000010",
-        "020000000020",
-        "020000000030",
-        "0x01020304",
-        "0x1234",
-        "example.test",
-        "1700000000"
+        "020000000035",
+        "observability.invalid",
+        "0x2001",
+        "0x2002",
+        "1700001000"
     )
 
     $AfterFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
         [System.IO.Path]::GetRelativePath($Expanded, $_.FullName).Replace("\", "/")
     } | Sort-Object)
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
-        throw "Portable device-journey analysis modified its distribution directory."
+        throw "Portable capture-observability analysis modified its distribution directory."
     }
-    Write-Host "Portable DEVICE-1 DHCP/DNS/TCP journey with unassigned EAP/RADIUS passed."
+
+    Write-Host "Portable unanswered DNS and capture-boundary observability integration test passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue

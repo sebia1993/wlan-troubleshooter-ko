@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the Ethernet event fixture with a distinct RADIUS NAD L2 address.
+"""Generate the event fixture with a distinct RADIUS NAD L2 address.
 
-The shared event fixture intentionally reuses a small set of synthetic MAC
-addresses. Device-journey validation needs a more realistic RADIUS path where
-the outer NAD/server Ethernet addresses are not the wireless client address.
-Only Ethernet headers of RADIUS frames 6 and 7 are changed; packet payloads and
-protocol events remain identical.
+The shared Ethernet fixture intentionally reuses a compact set of synthetic
+addresses. Device-journey validation needs a realistic RADIUS path where the
+outer NAD/server Ethernet addresses are not the supplicant address. Only the
+Ethernet headers of RADIUS frames 6 and 7 are changed; protocol payloads remain
+identical.
 """
 
 from __future__ import annotations
