@@ -45,7 +45,7 @@ class TSharkCatalogTests(unittest.TestCase):
         catalog = parse_field_catalog(CATALOG_LINES)
         registry = load_field_profiles(self.registry_path())
         resolved = resolve_profile(registry, catalog, "protocol-inventory")
-        self.assertEqual(resolved.profile_version, "0.5.0")
+        self.assertEqual(resolved.profile_version, "0.6.0")
         self.assertEqual(resolved.headers()[0], "frame.number")
         self.assertEqual(resolved.output_keys()[-1], "protocols")
         self.assertEqual(resolved.missing_optional_fields, ())
@@ -55,6 +55,7 @@ class TSharkCatalogTests(unittest.TestCase):
                 "protocol-inventory",
                 "connection-events",
                 "device-identities",
+                "eapol-replay-relations",
             },
         )
         self.assertTrue(catalog.has_field("frame.protocols"))
@@ -75,8 +76,8 @@ class TSharkCatalogTests(unittest.TestCase):
         )
         events = resolve_profile(registry, extended, "connection-events")
         identities = resolve_profile(registry, extended, "device-identities")
-        self.assertEqual(events.profile_version, "0.5.0")
-        self.assertEqual(identities.profile_version, "0.5.0")
+        self.assertEqual(events.profile_version, "0.6.0")
+        self.assertEqual(identities.profile_version, "0.6.0")
         self.assertIn("frame.time_epoch", events.headers())
         self.assertIn("frame.time_epoch", identities.headers())
         self.assertIn("eap_code", events.missing_optional_fields)
@@ -105,6 +106,41 @@ class TSharkCatalogTests(unittest.TestCase):
         )
         self.assertNotIn("ip.src", resolved.headers())
         self.assertNotIn("wlan.ssid", resolved.headers())
+
+    def test_replay_profile_is_minimal_and_optional_fields_are_explicit(self):
+        registry = load_field_profiles(self.registry_path())
+        minimal = resolve_profile(
+            registry,
+            parse_field_catalog(CATALOG_LINES),
+            "eapol-replay-relations",
+        )
+        self.assertEqual(minimal.headers(), ("frame.number",))
+        self.assertEqual(
+            minimal.missing_optional_fields,
+            ("eapol_key_message", "eapol_replay_counter"),
+        )
+
+        extended = parse_field_catalog(
+            CATALOG_LINES
+            + [
+                "F\tEAPOL message\twlan_rsna_eapol.keydes.msgnr\tFT_UINT8\twlan_rsna_eapol\tBASE_DEC\t0x0\t\n",
+                "F\tReplay Counter\teapol.keydes.replay_counter\tFT_UINT64\teapol\tBASE_DEC\t0x0\t\n",
+            ]
+        )
+        resolved = resolve_profile(
+            registry,
+            extended,
+            "eapol-replay-relations",
+        )
+        self.assertEqual(
+            resolved.headers(),
+            (
+                "frame.number",
+                "wlan_rsna_eapol.keydes.msgnr",
+                "eapol.keydes.replay_counter",
+            ),
+        )
+        self.assertEqual(resolved.missing_optional_fields, ())
 
     def test_missing_optional_field_is_recorded(self):
         catalog = parse_field_catalog(
@@ -174,7 +210,7 @@ class TSharkCatalogTests(unittest.TestCase):
             duplicate = Path(directory) / "duplicate.json"
             duplicate.write_text(
                 '{"schema_version":1,"schema_version":1,'
-                '"profile_version":"0.5.0","profiles":[],"protocol_groups":[]}',
+                '"profile_version":"0.6.0","profiles":[],"protocol_groups":[]}',
                 encoding="utf-8",
             )
             with self.assertRaises(FieldProfileError):
