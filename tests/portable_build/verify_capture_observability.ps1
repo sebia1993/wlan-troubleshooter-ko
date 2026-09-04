@@ -23,6 +23,31 @@ function Restore-EnvironmentValue {
     }
 }
 
+function Write-SafeFailureSummary {
+    param([Parameter(Mandatory = $true)][string]$ResultPath)
+
+    if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
+        Write-Host "Capture-observability state: result file was not created"
+        return
+    }
+    try {
+        $Failure = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json -Depth 64
+        $State = [string]$Failure.protocol_inventory_state
+        $Message = [string]$Failure.protocol_inventory_message
+        if ($State -notin @("completed", "unavailable", "failed")) {
+            $State = "invalid-result"
+        }
+        if ($Message.Length -gt 500) {
+            $Message = $Message.Substring(0, 500)
+        }
+        Write-Host "Capture-observability state: $State"
+        Write-Host "Capture-observability message: $Message"
+    }
+    catch {
+        Write-Host "Capture-observability state: unreadable-result"
+    }
+}
+
 function Assert-NoForbiddenText {
     param(
         [Parameter(Mandatory = $true)][string]$Raw,
@@ -100,6 +125,7 @@ try {
         )
         $Process = Start-Process -FilePath $Application -ArgumentList $Arguments -WorkingDirectory $Expanded -Wait -PassThru
         if ($Process.ExitCode -ne 0) {
+            Write-SafeFailureSummary -ResultPath $Output
             throw "Portable capture-observability analysis failed with exit code $($Process.ExitCode)."
         }
     }
@@ -115,6 +141,7 @@ try {
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 160
     if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
+        Write-SafeFailureSummary -ResultPath $Output
         throw "Portable capture-observability analysis did not complete with schema version 2."
     }
 
