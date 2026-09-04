@@ -1,39 +1,58 @@
 # 변경 기록
 
-## 0.7.0-alpha.1 — 2026-09-04
+## 0.8.0-alpha.1 — 2026-09-04
 
 ### 추가
 
-- EAP·RADIUS·DHCP·DNS·TCP 비식별 프로토콜 거래 시도 요약
-- 같은 로컬 별칭이 종료 응답 뒤 재사용될 때 `A1`, `A2` 시도 번호로 분리
-- `complete`, `success-observed`, `failure-observed`, `mixed`, `incomplete` 상태
-- 관찰 이벤트·미관찰 순서 요소·첫/마지막 프레임·상대 지속시간·근거 필터
-- 프로토콜별 초급 엔지니어 다음 점검 항목
-- 거래 별칭 50,000개, 거래별 이벤트 200,000개, 근거 프레임 64개 상한
-- GUI의 `[6. 비식별 거래 시도 요약]` 영역
-- Portable EAP·RADIUS·DHCP·DNS·TCP 실제 거래 시도 검증 게이트
+- 분석 실행별 `DEVICE-N`·`AP-N` 가명화
+- 공개 이벤트 프로파일과 분리된 `device-identities` 전용 TShark 프로파일
+- 전용 프로파일에 한정한 `eth.src`, `eth.dst`, `wlan.sa`, `wlan.da`, `wlan.bssid` 허용
+- 분석 실행마다 새 32바이트 HMAC-SHA-256 키 생성
+- 802.11 관리 프레임·EAP 방향·DHCP 클라이언트 근거 기반 단말 최초 등록
+- 알려진 단말이 하나만 포함된 후속 DNS·TCP·TLS·ARP 프레임 할당
+- 거래 근거 프레임이 하나의 단말만 가리킬 때 거래 시도 연결
+- GUI `[7. 분석 실행별 단말·AP 가명]` 영역
+- Portable Ethernet `DEVICE-1` 및 IEEE 802.11 `DEVICE-1`·`AP-1` 개인정보 검증 게이트
+- 가명화 개인정보 경계 ADR 0004
 
-### 판정 안전성
+### 개인정보 보호
 
-- 모든 거래에 `root_cause_confirmed=false` 고정
-- 모든 거래에 `device_session_confirmed=false` 고정
-- TCP SYN/SYN-ACK만으로 3-Way Handshake 완료를 표시하지 않음
-- 프로토콜별 거래를 서로 연결해 동일 단말 접속으로 단정하지 않음
-- 일부 캡처나 이벤트 보관 생략이 있으면 보고서 전체 완료 표시 차단
-- 미완료 거래를 서버·방화벽·ClearPass 장애로 확정하지 않음
+- 원문 L2 주소·HMAC digest·가명화 비밀키·대응표 직렬화 금지
+- 가명화 비밀키의 파일·로그·환경변수 저장 금지
+- 실행 간 동일 별칭 보장 금지
+- IP·IPv6·SSID·사용자명·DNS 질의명·포트·Payload를 가명화 프로파일에서도 제외
+- 결과 플래그 `raw_identifiers_serialized=false`
+- 결과 플래그 `alias_secret_persisted=false`
+- 결과 플래그 `aliases_stable_across_runs=false`
+
+### 오탐 방지
+
+- 일반 DNS·TCP 주소만으로 새 단말 가명 미생성
+- 브로드캐스트·멀티캐스트·전부 0인 주소 제외
+- 한 프레임에 둘 이상의 알려진 단말이 있으면 모호함으로 유지
+- 단말 L2 근거가 없는 RADIUS 거래를 시간만으로 연결하지 않음
+- 각 단말 결과에 `device_identity_confirmed=false`
+- 각 단말 결과에 `cross_protocol_session_confirmed=false`
 
 ### 호환성
 
 - 기존 분석 JSON 스키마 버전 2 유지
-- `transaction_sessions`를 하위 호환 가능한 추가 결과로 제공
-- 기존 Phase 4C 타임라인과 Finding의 필드·의미 유지
+- `device_sessions`를 하위 호환 가능한 추가 결과로 제공
+- 기존 인벤토리·Finding·타임라인·거래 시도 의미 유지
 
 ### 제한
 
-- 단말별 익명 세션 분리와 서로 다른 프로토콜 거래 연결은 아직 지원하지 않음
-- 동일 단말의 EAPOL 4-Way Handshake 완결성은 아직 지원하지 않음
-- 로밍·RF 근본 원인과 최종 HTML 보고서는 아직 지원하지 않음
+- Python·TShark 메모리 버퍼에 원문 L2 주소가 분석 중 일시적으로 존재할 수 있음
+- 실행 간 단말 추적과 여러 캡처 파일 결합은 지원하지 않음
+- `DEVICE-N` 내부의 여러 접속 시간 구간 분리는 아직 지원하지 않음
+- RADIUS·4-Way Handshake·로밍·RF·HTML 보고서는 후속 단계
 - 애플리케이션 EXE 상용 코드 서명 인증서는 없음
+
+## 0.7.0-alpha.1 — 2026-09-04
+
+- EAP·RADIUS·DHCP·DNS·TCP 비식별 프로토콜 거래 시도 요약
+- 종료 응답 뒤 재사용된 로컬 별칭의 `A1`, `A2` 시도 분리
+- 보수적 거래 완결성, 근거 프레임과 다음 점검 항목
 
 ## 0.6.0-alpha.1 — 2026-09-04
 
