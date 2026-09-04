@@ -12,18 +12,23 @@ class ReleaseMetadataTests(unittest.TestCase):
         cls.project = (cls.root / "pyproject.toml").read_text(encoding="utf-8")
 
     def value(self, key):
-        match = re.search(r'^' + re.escape(key) + r'\s*=\s*"([^"]+)"', self.project, re.MULTILINE)
+        match = re.search(
+            r'^' + re.escape(key) + r'\s*=\s*"([^"]+)"',
+            self.project,
+            re.MULTILINE,
+        )
         self.assertIsNotNone(match)
         return match.group(1)
 
     def test_project_module_and_release_versions_match(self):
         self.assertEqual(self.value("version"), wlan_troubleshooter_ko.__version__)
-        self.assertEqual(self.value("version"), "0.7.0a1")
-        self.assertEqual(self.value("release-tag"), "v0.7.0-alpha.1")
-        self.assertEqual(self.value("phase"), "4D")
+        self.assertEqual(self.value("version"), "0.8.0a1")
+        self.assertEqual(self.value("release-tag"), "v0.8.0-alpha.1")
+        self.assertEqual(self.value("phase"), "4E")
         self.assertEqual(self.value("ruleset-version"), "0.2.0")
-        self.assertEqual(self.value("field-profile-version"), "0.4.0")
+        self.assertEqual(self.value("field-profile-version"), "0.5.0")
         self.assertEqual(self.value("transaction-session-version"), "1")
+        self.assertEqual(self.value("device-session-version"), "1")
 
     def test_portable_component_versions_are_pinned(self):
         self.assertEqual(self.value("portable-python"), "3.13")
