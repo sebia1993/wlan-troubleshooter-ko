@@ -17,18 +17,18 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "4B")
+        self.assertEqual(result["phase"], "4C")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["ruleset_version"], "0.2.0")
         self.assertEqual(result["rule_count"], "11")
-        self.assertEqual(result["field_profile_version"], "0.3.0")
+        self.assertEqual(result["field_profile_version"], "0.4.0")
         self.assertEqual(result["inventory_field_count"], "5")
-        self.assertEqual(result["event_field_count"], "27")
+        self.assertEqual(result["event_field_count"], "32")
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
-        self.assertIn("접속 단계 상관분석", result["analysis_features"])
+        self.assertIn("이벤트 타임라인", result["analysis_features"])
 
     def test_self_check_can_write_new_local_json_for_windowed_exe(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -38,7 +38,8 @@ class AppSmokeTests(unittest.TestCase):
             value = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(value["network_features"], "없음")
             self.assertEqual(value["python_external_required"], "true")
-            self.assertEqual(value["phase"], "4B")
+            self.assertEqual(value["phase"], "4C")
+            self.assertEqual(value["event_field_count"], "32")
             with self.assertRaises(FileExistsError):
                 main(["--self-check-output=" + str(output)])
 
@@ -84,6 +85,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(state.valid)
             self.assertIn("캡처 유형 추정", state.detail)
             self.assertIn("프로토콜 존재 인벤토리", state.detail)
+            self.assertIn("이벤트 타임라인", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)

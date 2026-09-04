@@ -1,4 +1,4 @@
-"""결정론적 캡처 점검, 프로토콜 인벤토리와 접속 단계 상관분석."""
+"""결정론적 캡처 점검, 인벤토리, Finding과 이벤트 타임라인."""
 
 from wlan_troubleshooter_ko.analysis.event_correlation import (
     DiagnosticFinding,
@@ -6,6 +6,14 @@ from wlan_troubleshooter_ko.analysis.event_correlation import (
     EventCorrelationError,
     StageSummary,
     build_event_correlation,
+)
+from wlan_troubleshooter_ko.analysis.event_timeline import (
+    EventTimeline,
+    EventTimelineError,
+    EventTypeSummary,
+    ProtocolEvent,
+    StageAssessment,
+    build_event_timeline,
 )
 from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
@@ -38,13 +46,19 @@ __all__ = [
     "DiagnosticFinding",
     "EventCorrelation",
     "EventCorrelationError",
+    "EventTimeline",
+    "EventTimelineError",
+    "EventTypeSummary",
     "InterfaceSummary",
+    "ProtocolEvent",
     "ProtocolInventory",
     "ProtocolInventoryError",
     "ProtocolObservation",
+    "StageAssessment",
     "StageSummary",
     "analyze_capture",
     "build_event_correlation",
+    "build_event_timeline",
     "build_protocol_inventory",
     "classify_capture_capabilities",
     "inspect_capture_structure",

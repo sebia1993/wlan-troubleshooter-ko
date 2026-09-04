@@ -11,6 +11,10 @@ from wlan_troubleshooter_ko.analysis.event_correlation import (
     EventCorrelation,
     build_event_correlation,
 )
+from wlan_troubleshooter_ko.analysis.event_timeline import (
+    EventTimeline,
+    build_event_timeline,
+)
 from wlan_troubleshooter_ko.analysis.protocol_inventory import (
     ProtocolInventory,
     build_protocol_inventory,
@@ -23,6 +27,7 @@ from wlan_troubleshooter_ko.tshark.policy import (
     build_profile_argv,
 )
 from wlan_troubleshooter_ko.tshark.profiles import (
+    ResolvedField,
     ResolvedProfile,
     load_field_profiles,
     resolve_profile,
@@ -32,6 +37,15 @@ from wlan_troubleshooter_ko.tshark.runner import (
     build_isolated_environment,
     probe_bundle_runtime,
 )
+
+
+_TIMELINE_OUTPUT_KEY_ALIASES = {
+    "eap_id": "eap_identifier",
+    "radius_id": "radius_identifier",
+    "dhcp_id": "dhcp_transaction_id",
+    "dns_id": "dns_identifier",
+    "dns_rcode": "dns_response_code",
+}
 
 
 @dataclass(frozen=True)
@@ -131,6 +145,7 @@ class ProtocolInventoryRun:
     catalog_records: int
     inventory: ProtocolInventory
     event_correlation: Optional[EventCorrelation] = None
+    event_timeline: Optional[EventTimeline] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -146,7 +161,44 @@ class ProtocolInventoryRun:
                 if self.event_correlation is None
                 else self.event_correlation.to_dict()
             ),
+            "event_timeline": (
+                None
+                if self.event_timeline is None
+                else self.event_timeline.to_dict()
+            ),
         }
+
+
+def adapt_connection_profile_for_timeline(
+    profile: ResolvedProfile,
+) -> ResolvedProfile:
+    """기존 접속 분석 출력 키를 타임라인 모델의 비식별 키로 변환한다."""
+
+    if profile.profile_id != "connection-events":
+        raise TSharkExecutionError("접속 이벤트 프로파일만 타임라인으로 변환할 수 있습니다.")
+    fields = tuple(
+        ResolvedField(
+            _TIMELINE_OUTPUT_KEY_ALIASES.get(item.output_key, item.output_key),
+            item.field_name,
+        )
+        for item in profile.fields
+    )
+    output_keys = tuple(item.output_key for item in fields)
+    if len(output_keys) != len(set(output_keys)):
+        raise TSharkExecutionError("타임라인 출력 키가 중복됐습니다.")
+    return ResolvedProfile(
+        profile_id="event-timeline",
+        profile_version=profile.profile_version,
+        display_filter_name=profile.display_filter_name,
+        max_packets=profile.max_packets,
+        fields=fields,
+        missing_optional_fields=tuple(
+            sorted(
+                _TIMELINE_OUTPUT_KEY_ALIASES.get(item, item)
+                for item in profile.missing_optional_fields
+            )
+        ),
+    )
 
 
 def prepare_field_catalog_invocation(
@@ -273,7 +325,7 @@ def run_connection_analysis(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> ProtocolInventoryRun:
-    """한 번의 fields 출력에서 인벤토리와 접속 단계 Finding을 함께 만든다."""
+    """한 번의 fields 출력에서 인벤토리·Finding·이벤트 타임라인을 만든다."""
 
     if not workspace_root.is_dir():
         raise TSharkExecutionError("접속 단계 분석 작업공간이 준비되지 않았습니다.")
@@ -312,6 +364,11 @@ def run_connection_analysis(
         expected_frames=expected_frames,
         has_80211_link_type=has_80211_link_type,
     )
+    timeline = build_event_timeline(
+        fields_result.text,
+        adapt_connection_profile_for_timeline(resolved_profile),
+        expected_frames=expected_frames,
+    )
     return ProtocolInventoryRun(
         bundle_version=fields_result.bundle_version,
         manifest_sha256=fields_result.manifest_sha256,
@@ -319,4 +376,5 @@ def run_connection_analysis(
         catalog_records=catalog.records_scanned,
         inventory=inventory,
         event_correlation=correlation,
+        event_timeline=timeline,
     )

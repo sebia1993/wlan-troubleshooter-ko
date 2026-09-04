@@ -51,9 +51,9 @@ def self_check() -> Dict[str, str]:
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
-        analysis_execution = "활성 · 프로토콜 인벤토리와 접속 단계 Finding"
+        analysis_execution = "활성 · 접속 단계 Finding과 비식별 이벤트 타임라인"
     return {
-        "phase": "4B",
+        "phase": "4C",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "rule_count": str(len(rules["rules"])),
@@ -69,8 +69,8 @@ def self_check() -> Dict[str, str]:
         "portable_tshark": tshark_status,
         "protocol_inventory_execution": analysis_execution,
         "analysis_features": (
-            "캡처 구조 점검 + 프로토콜 존재 인벤토리 + "
-            "접속 단계 상관분석·근거 기반 Finding"
+            "캡처 구조 점검 + 프로토콜 존재 인벤토리 + 접속 단계 상관분석 + "
+            "근거 기반 Finding + 비식별 이벤트 타임라인"
         ),
         "network_features": "없음",
     }

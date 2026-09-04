@@ -149,6 +149,12 @@ try {
     else {
         $BuildInfo | Add-Member -NotePropertyName protocol_inventory_runtime -NotePropertyValue "enabled"
     }
+    if ($BuildInfo.PSObject.Properties.Name -contains "event_timeline_runtime") {
+        $BuildInfo.event_timeline_runtime = "enabled"
+    }
+    else {
+        $BuildInfo | Add-Member -NotePropertyName event_timeline_runtime -NotePropertyValue "enabled"
+    }
     $BuildInfo | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $BuildInfoPath -Encoding utf8
 
     $Executables = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File -Filter "*.exe" | ForEach-Object {

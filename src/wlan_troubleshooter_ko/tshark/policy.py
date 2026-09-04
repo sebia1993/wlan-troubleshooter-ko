@@ -19,16 +19,22 @@ APPROVED_FIELDS = (
     "frame.len",
     "frame.protocols",
     "wlan.fc.type_subtype",
+    "wlan.fc.retry",
     "wlan.fixed.status_code",
     "wlan.fixed.reason_code",
+    "wlan.fixed.auth.alg",
+    "wlan.fixed.auth_seq",
     "eapol.type",
+    "wlan_rsna_eapol.keydes.msgnr",
     "eap.code",
     "eap.id",
     "eap.type",
     "radius.code",
     "radius.id",
     "dhcp.id",
+    "bootp.id",
     "dhcp.option.dhcp",
+    "bootp.option.dhcp",
     "dns.id",
     "dns.flags.response",
     "dns.flags.rcode",
@@ -39,6 +45,7 @@ APPROVED_FIELDS = (
     "tcp.flags.ack",
     "tcp.flags.reset",
     "tcp.analysis.retransmission",
+    "tls.handshake.type",
 )
 _PROFILE_REQUIRED_FIELDS = {
     "protocol-inventory": {
@@ -214,7 +221,13 @@ def assert_safe_profile_argv(arguments: List[str]) -> None:
         raise TSharkPolicyError("fields 출력 옵션이 승인된 고정 형식과 다릅니다.")
     if arguments[19] != "-Y" or arguments[20] not in APPROVED_DISPLAY_FILTERS.values():
         raise TSharkPolicyError("승인되지 않은 Display Filter입니다.")
-    _read_field_pairs(arguments, 21)
+    fields = _read_field_pairs(arguments, 21)
+    event_profile = "frame.time_epoch" in fields
+    required_fields = _PROFILE_REQUIRED_FIELDS[
+        "connection-events" if event_profile else "protocol-inventory"
+    ]
+    if not required_fields.issubset(fields):
+        raise TSharkPolicyError("추출 프로파일 필수 필드가 누락됐습니다.")
 
 
 def build_profile_argv(

@@ -1,4 +1,4 @@
-"""캡처 구조, 프로토콜 인벤토리와 접속 단계 Finding을 보여 주는 GUI."""
+"""캡처 구조, 프로토콜 인벤토리, Finding과 이벤트 타임라인을 보여 주는 GUI."""
 
 from __future__ import annotations
 
@@ -53,13 +53,13 @@ def _portable_status(bundle_status: BundleStatus) -> str:
         profile = registry.get_profile("connection-events")
     except FieldProfileError:
         return "접속 단계 프로파일 오류 · 배포본을 다시 받아야 합니다."
-    base = "필드 프로파일 {0} · 접속 분석 필드 {1}개 · 프로토콜 그룹 {2}개".format(
+    base = "필드 프로파일 {0} · 접속·타임라인 필드 {1}개 · 프로토콜 그룹 {2}개".format(
         registry.profile_version,
         len(profile.fields),
         len(registry.protocol_groups),
     )
     if bundle_status.code == "integrity_verified":
-        return base + " · 내장 TShark 무결성 확인됨 · 접속 단계 분석 사용 가능"
+        return base + " · 내장 TShark 무결성 확인됨 · 상세 이벤트 분석 사용 가능"
     return base + " · 소스 실행 모드 · Portable 배포본에서는 내장 TShark가 사용됩니다."
 
 
@@ -220,6 +220,74 @@ def _format_correlation(result: CaptureAnalysisResult) -> str:
     )
 
 
+def _format_timeline(result: CaptureAnalysisResult, limit: int = 120) -> str:
+    run = result.protocol_inventory
+    if run is None or run.event_timeline is None:
+        return "\n\n[5. 비식별 이벤트 타임라인]\n이벤트 타임라인 결과가 없습니다."
+    timeline = run.event_timeline
+    state_names = {
+        "success-observed": "성공 결과 관찰",
+        "failure-observed": "실패 결과 관찰",
+        "mixed": "성공·실패 혼재",
+        "sequence-observed": "순서 요소 관찰",
+        "activity-observed": "관련 트래픽 관찰",
+        "not-observed": "관찰되지 않음",
+        "unavailable": "판단 불가",
+    }
+    stage_lines = []
+    for stage in timeline.stages:
+        stage_lines.append(
+            "- [{state}] {label}: {summary} · 근거 {frames}".format(
+                state=state_names.get(stage.state, stage.state),
+                label=stage.label_ko,
+                summary=stage.summary_ko,
+                frames=_frames(stage.evidence_frames),
+            )
+        )
+
+    visible = timeline.events[:limit]
+    event_lines = []
+    for item in visible:
+        alias = "" if item.correlation_alias is None else " · 상관 별칭 " + item.correlation_alias
+        code = "" if item.code is None else " · 코드 " + str(item.code)
+        event_lines.append(
+            "- +{time:,}ms · 프레임 #{frame:,} · {label}{alias}{code}\n"
+            "  Wireshark 필터: {display_filter}".format(
+                time=item.relative_time_ms,
+                frame=item.frame_number,
+                label=item.label_ko,
+                alias=alias,
+                code=code,
+                display_filter=item.evidence_filter,
+            )
+        )
+    if not event_lines:
+        event_lines.append("- 승인된 이벤트 필드에서 표시할 이벤트를 관찰하지 못했습니다.")
+    hidden = max(0, timeline.events_total - len(visible))
+    if hidden:
+        event_lines.append(
+            "- 반복 이벤트 {0:,}건은 상세 화면에서 생략했으며 유형별 집계에는 포함했습니다.".format(
+                hidden
+            )
+        )
+
+    return (
+        "\n\n[5. 비식별 이벤트 타임라인]\n"
+        "처리 프레임 {frames:,}개 · 전체 이벤트 {total:,}건 · 상세 보관 {retained:,}건\n"
+        "단계별 관찰 결과:\n{stages}\n\n"
+        "주요 이벤트:\n{events}\n"
+        "주의: {cautions}\n"
+        "상관 별칭은 캡처 내부 순번이며 원본 거래 ID·스트림 번호를 표시하지 않습니다."
+    ).format(
+        frames=timeline.frames_observed,
+        total=timeline.events_total,
+        retained=timeline.events_retained,
+        stages="\n".join(stage_lines),
+        events="\n".join(event_lines),
+        cautions=_compact(timeline.cautions, limit=8),
+    )
+
+
 def format_analysis_detail(result: CaptureAnalysisResult) -> str:
     detail = _format_preflight(
         result.capture_format,
@@ -229,14 +297,19 @@ def format_analysis_detail(result: CaptureAnalysisResult) -> str:
         result.capabilities,
     )
     if result.inventory_state == "completed":
-        return detail + _format_observations(result) + _format_correlation(result)
+        return (
+            detail
+            + _format_observations(result)
+            + _format_correlation(result)
+            + _format_timeline(result)
+        )
     return (
         detail
-        + "\n\n[2. 프로토콜 및 접속 단계 분석]\n"
+        + "\n\n[2. 프로토콜 존재 인벤토리·접속 단계·이벤트 타임라인]\n"
         + ("실행 안 함" if result.inventory_state == "unavailable" else "실패")
         + ": "
         + result.inventory_message
-        + "\n사전 점검 결과는 유지되지만 프로토콜·접속 단계 결과는 확정하지 않습니다."
+        + "\n사전 점검 결과는 유지되지만 프로토콜·접속 단계·이벤트 결과는 확정하지 않습니다."
     )
 
 
@@ -305,9 +378,9 @@ class CaptureViewModel:
         self.capabilities = result.capabilities
         self.analysis_result = result
         if result.inventory_state == "completed":
-            status = "캡처 구조·프로토콜 인벤토리·접속 단계 분석을 완료했습니다."
+            status = "캡처 구조·Finding·비식별 이벤트 타임라인 분석을 완료했습니다."
         elif result.inventory_state == "failed":
-            status = "캡처 사전 점검은 완료했지만 접속 단계 분석에 실패했습니다."
+            status = "캡처 사전 점검은 완료했지만 상세 이벤트 분석에 실패했습니다."
         else:
             status = "캡처 사전 점검을 완료했습니다."
         self.state = CaptureViewState(
@@ -354,7 +427,7 @@ class MainWindow:
         ).pack(anchor="w", pady=(12, 4))
         ttk.Label(
             frame,
-            text="캡처 구조 · 프로토콜 인벤토리 · 접속 단계 · 근거 기반 Finding",
+            text="캡처 구조 · 접속 단계 · 근거 Finding · 비식별 이벤트 타임라인",
         ).pack(anchor="w")
 
         ttk.Separator(frame).pack(fill="x", pady=16)
@@ -416,8 +489,8 @@ class MainWindow:
         ttk.Label(
             frame,
             text=(
-                "명시적 실패 응답은 근거 프레임과 함께 표시합니다. "
-                "응답이 보이지 않은 경우에는 장애로 확정하지 않습니다."
+                "명시적 실패 응답과 시간순 이벤트를 근거 프레임과 함께 표시합니다. "
+                "여러 단말이 섞인 캡처를 하나의 접속으로 단정하지 않습니다."
             ),
             wraplength=840,
         ).pack(anchor="w", pady=(3, 0))
@@ -451,7 +524,7 @@ class MainWindow:
         self._validation_cancel.set()
         cancel_event = threading.Event()
         self._validation_cancel = cancel_event
-        self._status.set("캡처 구조와 접속 단계를 분석하고 있습니다.")
+        self._status.set("캡처 구조·접속 단계·이벤트 타임라인을 분석하고 있습니다.")
         self._set_detail(
             "파일명과 패킷 원문은 화면과 로그에 표시하지 않습니다. "
             "큰 캡처는 시간이 걸릴 수 있으며 언제든 분석 취소를 누를 수 있습니다."
