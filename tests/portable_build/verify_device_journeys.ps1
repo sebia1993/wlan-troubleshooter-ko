@@ -65,10 +65,8 @@ $Expanded = Join-Path $WorkRoot "portable"
 $Capture = Join-Path $WorkRoot "private-device-journey.pcap"
 $Output = Join-Path $WorkRoot "device-journey.json"
 New-Item -ItemType Directory -Path $Expanded -Force | Out-Null
-
 try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
-
     $BuildInfo = Get-Content -LiteralPath (Join-Path $Expanded "BUILD_INFO.json") -Raw | ConvertFrom-Json -Depth 32
     if (
         $BuildInfo.device_session_runtime -ne "enabled" -or
@@ -80,7 +78,7 @@ try {
         throw "Portable BUILD_INFO does not preserve the device-journey privacy boundary."
     }
 
-    & $PythonPath (Join-Path $PSScriptRoot "generate_event_fixture.py") --output $Capture
+    & $PythonPath (Join-Path $PSScriptRoot "generate_device_journey_fixture.py") --output $Capture
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Capture -PathType Leaf)) {
         throw "Synthetic device-journey fixture generation failed."
     }
@@ -127,13 +125,16 @@ try {
         $Report.schema_version -ne 1 -or
         $Report.journeys_total -ne 1 -or
         $Report.source_complete -ne $true -or
+        $Report.linkage_complete -ne $false -or
+        $Report.complete -ne $false -or
+        [int]$Report.unassigned_attempts -lt 1 -or
         $Report.raw_identifiers_serialized -ne $false -or
         $Report.aliases_stable_across_runs -ne $false -or
         $Report.device_identity_confirmed -ne $false -or
         $Report.cross_protocol_session_confirmed -ne $false -or
         $Report.root_cause_confirmed -ne $false
     ) {
-        throw "Portable device-journey report is missing or violated its privacy boundary."
+        throw "Portable device-journey report is missing or violated its conservative linkage/privacy boundary."
     }
 
     $Journey = @($Report.journeys)[0]
@@ -158,6 +159,9 @@ try {
     }
     if ($ObservedOrder[0] -ne "eap" -or $ObservedOrder[-1] -ne "tcp") {
         throw "Portable DEVICE-1 stage order does not follow observed packet order."
+    }
+    if ($ObservedOrder -contains "radius") {
+        throw "RADIUS was linked to DEVICE-1 without direct supplicant L2 evidence."
     }
 
     $EapStage = Get-Stage -Journey $Journey -Protocol "eap"
@@ -186,8 +190,10 @@ try {
         "198.51.100.10",
         "02:00:00:00:00:10",
         "02:00:00:00:00:20",
+        "02:00:00:00:00:30",
         "020000000010",
         "020000000020",
+        "020000000030",
         "0x01020304",
         "0x1234",
         "example.test",
@@ -200,8 +206,7 @@ try {
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
         throw "Portable device-journey analysis modified its distribution directory."
     }
-
-    Write-Host "Portable DEVICE-1 EAP/DHCP/DNS/TCP conservative journey integration test passed."
+    Write-Host "Portable DEVICE-1 EAP/DHCP/DNS/TCP journey with unassigned RADIUS passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
