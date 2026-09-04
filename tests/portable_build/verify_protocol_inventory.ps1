@@ -120,9 +120,9 @@ try {
     }
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 96
-    if ($Result.schema_version -ne 3 -or $Result.protocol_inventory_state -ne "completed") {
+    if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
         Write-SafeFailureSummary -ResultPath $Output
-        throw "Portable connection analysis did not complete with schema version 3."
+        throw "Portable connection analysis did not complete with schema version 2."
     }
     if ($Result.protocol_inventory.inventory.frames_observed -ne 5) {
         throw "Portable protocol inventory observed an unexpected frame count."
