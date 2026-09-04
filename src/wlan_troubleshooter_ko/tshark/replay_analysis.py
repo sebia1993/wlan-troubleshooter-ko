@@ -57,7 +57,8 @@ def run_eapol_replay_relation_analysis(
             "Replay Counter 관계 분석의 TShark 기준 정보가 올바르지 않습니다."
         )
 
-    registry = load_field_profiles(profile_path)
+    # Verify the active bundle before reading any profile file. This keeps a
+    # changed-bundle failure independent from local profile-path availability.
     catalog_result = run_field_catalog_text(
         vendor_root,
         workspace_root / "eapol-replay-field-catalog",
@@ -72,6 +73,7 @@ def run_eapol_replay_relation_analysis(
             "TShark 번들이 기존 분석과 Replay Counter 필드 검사 사이에 변경됐습니다."
         )
 
+    registry = load_field_profiles(profile_path)
     catalog = parse_field_catalog(
         catalog_result.text.splitlines(keepends=True)
     )
