@@ -63,7 +63,7 @@ class CaptureAnalysisResult:
 
     def to_dict(self) -> Dict[str, object]:
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "capture": {
                 "format": self.capture_format,
                 "size_bytes": self.size_bytes,
