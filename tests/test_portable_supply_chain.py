@@ -117,6 +117,7 @@ class PortableSupplyChainTests(unittest.TestCase):
         for value in (
             "generate_event_fixture.py",
             "generate_wireless_event_fixture.py",
+            "generate_eap_fixture.py",
             "event_timeline_runtime",
             "eap_success",
             "radius_access_accept",
@@ -126,16 +127,20 @@ class PortableSupplyChainTests(unittest.TestCase):
             "wlan_auth_response_success",
             "wlan_assoc_response_success",
             "wlan_deauthentication",
+            "PPP EAP",
         ):
             self.assertIn(value, timeline_verifier)
 
     def test_event_fixtures_are_generated_at_runtime_not_committed(self):
         ethernet = (self.support / "generate_event_fixture.py").read_text(encoding="utf-8")
         wireless = (self.support / "generate_wireless_event_fixture.py").read_text(encoding="utf-8")
+        eap = (self.support / "generate_eap_fixture.py").read_text(encoding="utf-8")
         for value in ("build_pcap", "_eapol", "_radius", "_dhcp", "_dns_response", "_tcp_frame"):
             self.assertIn(value, ethernet)
-        for value in ("build_pcap", "_authentication", "_association_response", "_eapol_data"):
+        for value in ("build_pcap", "_authentication", "_association_response", "_eapol_data", "_radiotap_header"):
             self.assertIn(value, wireless)
+        for value in ("build_pcap", "PPP_EAP_PROTOCOL", "_eap_packet", "_ppp_eap"):
+            self.assertIn(value, eap)
         self.assertFalse(any(self.root.rglob("*.pcap")))
         self.assertFalse(any(self.root.rglob("*.pcapng")))
 
