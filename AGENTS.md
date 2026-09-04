@@ -6,14 +6,14 @@
 
 ## 현재 범위
 
-현재 범위는 `docs/PHASE_4G_PLAN.md`의 **캡처 관찰 가능성과 미응답 해석 경계**입니다.
+현재 범위는 `docs/PHASE_4I_PLAN.md`의 **EAPOL-Key M1~M4 메시지 순서 관찰**입니다.
 
-- Phase 4F까지의 Finding·거래·단말 가명·여정 결과를 보존합니다.
-- 요청이 보이고 응답이 보이지 않는 상황을 확정 장애로 표현하지 않습니다.
-- 구조·이벤트·거래 완전성과 캡처 경계·잘림·상세 생략을 구분합니다.
-- 파일 전체 처리는 장애 구간 전체 포함, 양방향 수집과 무손실을 뜻하지 않습니다.
-- 초급 엔지니어가 Wireshark 근거 프레임을 다시 확인할 수 있게 합니다.
-- 가짜 응답·임시 성공값·근거 없는 책임 시스템 판정을 만들지 않습니다.
+- 기존 캡처 사전 점검·Finding·타임라인·거래·단말 가명·여정·관찰 가능성 결과를 보존합니다.
+- 이미 비식별화된 이벤트와 `DEVICE-N`·`AP-N` 근거만 사용합니다.
+- M1~M4 첫 관찰 순서, 미관찰 번호, 번호 반복과 같은 프레임 Retry 비트를 표시합니다.
+- 메시지 번호 순서를 동일 Handshake·키 설치·암호학적 성공으로 승격하지 않습니다.
+- Replay Counter·Nonce·MIC·Key Data를 제품 결과에 추가하지 않습니다.
+- 가짜 키 교환 결과, 임시 성공값과 근거 없는 원인을 만들지 않습니다.
 
 ## 기술과 런타임 금지사항
 
@@ -35,14 +35,24 @@
 - stderr 원문은 저장·표시하지 않습니다.
 - 호출마다 빈 config·plugin·extcap·data·temp 경로를 만들고 종료 후 무잔류를 확인합니다.
 
-## 입력과 개인정보 경계
+## Phase 4I 입력 경계
 
-Phase 4G 모델은 다음 이미 공개 가능한 결과만 사용합니다.
+사용 입력:
 
 ```text
-CaptureStructure
 EventTimeline
-TransactionSessionReport
+DeviceSessionReport
+```
+
+허용 값:
+
+```text
+eapol_key_message_1~4
+wlan_retry_flag
+frame_number
+relative_time_ms
+DEVICE-N
+AP-N
 ```
 
 다음 값은 모델·GUI·JSON·로그에 기록하지 않습니다.
@@ -56,110 +66,128 @@ DNS 질의명·호스트명
 TCP·UDP 포트
 원본 거래 ID·Stream 번호
 HMAC 키와 내부 토큰
+Replay Counter 원문
+Nonce·MIC·Key Data
+암호화 키
 절대 epoch
 Raw Payload·파일·쿠키·Authorization·자격 증명
 캡처 파일명·절대경로
 TShark stderr 원문
 ```
 
-## 분석 입력 완전성
+## 이벤트·근거 검증
 
-`analysis_input_complete=true`는 다음 조건을 모두 만족할 때만 허용합니다.
+- 이벤트 종류는 `eapol_key_message_1`부터 `eapol_key_message_4`만 허용합니다.
+- `details.message_number`가 이벤트 이름의 번호와 일치해야 합니다.
+- 이벤트 범주는 `eapol`이어야 합니다.
+- 근거 필터는 해당 `frame.number`와 일치해야 합니다.
+- 프레임과 상대 시간이 역순이면 거부합니다.
+- 동일 프레임의 Key 이벤트 중복을 거부합니다.
+- 단말 가명 보고서의 원문 직렬화·키 저장·실행 간 별칭 고정 플래그가 `false`가 아니면 거부합니다.
 
-```text
-CaptureStructure.scan_complete = true
-EventTimeline.complete = true
-TransactionSessionReport.complete = true
-EventTimeline.events_omitted = 0
-구조 패킷 수 = 이벤트 분석 프레임 수
-타임라인 이벤트 수 = 거래 보고서 이벤트 수
-```
+## 단말·AP 연결 규칙
 
-이 값이 true여도 캡처 시작·종료·무손실·양방향 수집은 증명되지 않습니다.
-
-## 미완료 거래 평가
-
-- `response-not-observed`: 완전한 분석 입력의 중간 프레임 범위에서 최종 응답 미관찰
-- `capture-boundary-risk`: 거래가 첫 프레임 또는 마지막 관찰 프레임에 닿음
-- `packet-truncation-risk`: 잘린 패킷으로 상위 필드 누락 가능성
-- `insufficient-analysis-input`: 일부 처리·이벤트 생략·거래 근거 생략
-
-우선순위는 다음과 같습니다.
+Key 이벤트는 다음 조건을 모두 만족할 때만 관찰에 포함합니다.
 
 ```text
-불완전 입력
-→ 패킷 잘림
-→ 캡처 경계
-→ 응답 미관찰
+이벤트 프레임이 DEVICE-N의 보관 근거에 포함
+해당 프레임의 DEVICE-N 후보가 정확히 1개
+해당 DEVICE-N의 AP-N 후보가 정확히 1개
 ```
+
+- 단말 후보 없음: 미할당
+- 단말 후보 둘 이상: 모호
+- AP 후보 없음 또는 둘 이상: 모호
+- 시간 근접성만으로 단말·AP 연결 금지
+- 단말 근거 프레임이 일부 생략되면 전체 완료 금지
+
+로밍으로 한 단말의 AP 가명이 둘 이상이면 현재 단계에서는 보수적으로 모호 처리합니다. 프레임별 비식별 DEVICE/AP 링크는 후속 Phase에서 설계합니다.
+
+## 관찰 창과 상태
+
+관찰 창 분리:
+
+- M4 뒤 새 Key 메시지: 새 관찰
+- M1 이후 단계가 진행된 상태에서 새 M1: 기존 관찰 종료 후 새 관찰
+- M1만 반복: 같은 관찰 유지
+
+상태:
+
+```text
+sequence-observed
+message-repetition-observed
+out-of-order
+incomplete
+```
+
+메시지 번호 반복과 Retry 비트가 함께 보여도 Replay Counter 관계가 없으므로 실제 동일 Handshake 재전송으로 확정하지 않습니다.
 
 ## 절대 판정 경계
 
 다음 값은 항상 `false`입니다.
 
 ```text
-capture_start_proven
-capture_end_proven
-capture_loss_excluded
-directionality_proven
-absence_can_confirm_failure
-absence_is_failure
+replay_counter_correlation_available
+raw_key_material_serialized
+raw_identifiers_serialized
+same_handshake_confirmed
+key_installation_confirmed
+cryptographic_success_confirmed
+root_cause_confirmed
 ```
 
-- 요청·응답 계열 이벤트가 모두 보여도 모든 방향 수집으로 확정하지 않습니다.
-- 응답 미관찰을 ClearPass·AD·DHCP·DNS·방화벽·서버·RF 장애로 확정하지 않습니다.
-- 거래가 파일 경계에 닿으면 캡처 전·후 패킷 가능성을 명시합니다.
-- 잘린 패킷이 있으면 직접 인과관계를 확정하지 않고 필드 누락 가능성만 표시합니다.
-- 근거가 부족하면 `판단 불가` 또는 위험 상태가 우선입니다.
+M1→M2→M3→M4가 모두 보여도 전체 무선 접속 성공이나 근본 원인을 확정하지 않습니다.
 
-## 기존 단말 여정 경계 유지
+기존 Phase 4G 경계도 유지합니다.
 
-- `DEVICE-N`, `AP-N`은 현재 실행에서만 유효합니다.
-- 단일 L2 근거로 이미 `linked`된 거래만 단말 여정에 포함합니다.
-- RADIUS처럼 단말 근거가 없는 거래를 시간으로 연결하지 않습니다.
-- 첫 실패 관찰 단계는 근본 원인 위치가 아닙니다.
-- `device_identity_confirmed=false`
-- `cross_protocol_session_confirmed=false`
-- `root_cause_confirmed=false`
-
-## Windows 격리 디렉터리
-
-실행 후 디렉터리 객체 교체는 장치 ID, 파일 ID/inode, 객체 종류, 링크 수와 Reparse Point 비트로 확인합니다. TShark 임시파일 사용으로 정상 변경되는 크기·mtime·ctime·Archive는 교체 판단에서 제외합니다. Symlink·Junction·Reparse Point와 실행 후 잔류 파일은 계속 거부합니다.
+```text
+capture_start_proven = false
+capture_end_proven = false
+capture_loss_excluded = false
+directionality_proven = false
+absence_can_confirm_failure = false
+```
 
 ## 자원 제한
 
 - 프로파일 처리 최대 100,000프레임
 - 상세 이벤트 최대 2,000건
 - 거래 시도 최대 50,000개
-- 거래 근거 프레임 최대 64개
-- 단말 여정 근거 최대 96개
+- 단말·AP 가명 각각 최대 20,000개
+- EAPOL-Key 이벤트 최대 20,000개
+- EAPOL 관찰 최대 10,000개
+- 관찰 근거 프레임 최대 64개
 - TShark stdout 64MiB, stderr 1MiB, 기본 실행 180초
 
 ## 검증과 릴리스
 
-변경 후 Windows에서 바이트코드 컴파일, 전체 테스트, 자체 점검, 소스 감사, 저장소 감사, Portable 빌드와 실제 내장 TShark 통합검증을 수행합니다.
+Windows에서 바이트코드 컴파일, 전체 테스트, 자체 점검, 소스 감사, 저장소 감사, Portable 빌드와 실제 내장 TShark 통합검증을 수행합니다.
 
-Portable 관찰 가능성 게이트는 런타임 생성 4프레임 PCAP을 사용합니다.
-
-```text
-#1 ARP Request
-#2 DNS Query — 중간 프레임, 응답 미관찰
-#3 ARP Reply
-#4 DNS Query — 마지막 프레임, 응답 미관찰
-```
-
-예상 결과:
+Portable 합성 캡처:
 
 ```text
-DNS-1-A1 = response-not-observed
-DNS-2-A1 = capture-boundary-risk
-DNS-2-A1 risk = capture-end-boundary-risk
-absence_is_failure = false
-absence_can_confirm_failure = false
+Authentication Request/Response
+Association Request/Response
+M1
+M2
+M3
+Retry 비트가 있는 반복 M3
+M4
 ```
 
-Python·Wireshark가 없는 환경에서 최종 EXE로 검증하고 식별정보·경로·절대 시간 비노출과 배포 폴더 무변경을 확인합니다.
+필수 결과:
 
-`v0.10.0-alpha.1`은 캡처 관찰 가능성과 미응답 해석 프리릴리스입니다. 응답 미관찰을 실제 장애로 확정하는 제품으로 표현하지 않습니다. 애플리케이션 상용 코드 서명이 없음을 명시합니다.
+```text
+DEVICE-1 ↔ AP-1
+state = message-repetition-observed
+observed_message_numbers = [1,2,3,3,4]
+first_observed_order = [1,2,3,4]
+repeated_message_numbers = [3]
+retry_flag_frames = [8]
+```
+
+Python·Wireshark가 없는 환경에서 최종 EXE로 검증하고 원본 식별정보·키 정보·절대 시간 비노출과 배포 폴더 무변경을 확인합니다.
+
+`v0.11.0-alpha.1`은 EAPOL-Key 메시지 번호 순서 관찰 프리릴리스입니다. 4-Way Handshake 성공 분석기로 표현하지 않으며 애플리케이션 상용 코드 서명이 없음을 명시합니다.
 
 외부 프로젝트의 소스·테스트·문장·이미지·자산을 복사하지 않습니다. 제3자 구성요소가 바뀌면 `THIRD_PARTY_NOTICES.md`, 공급망 고정값, 대응 소스와 라이선스를 먼저 갱신합니다.
