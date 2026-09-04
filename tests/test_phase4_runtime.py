@@ -24,14 +24,22 @@ F\tInterface id\tframe.interface_id\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
 F\tCapture Length\tframe.cap_len\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
 F\tFrame Length\tframe.len\tFT_UINT32\tframe\tBASE_DEC\t0x0\t
 F\tProtocols in frame\tframe.protocols\tFT_STRING\tframe\t\t0x0\t
+F\tDHCP transaction ID\tdhcp.id\tFT_UINT32\tdhcp\tBASE_HEX\t0x0\t
+F\tDHCP message type\tdhcp.option.dhcp\tFT_UINT8\tdhcp\tBASE_DEC\t0x0\t
+F\tEthernet source\teth.src\tFT_ETHER\teth\t\t0x0\t
+F\tEthernet destination\teth.dst\tFT_ETHER\teth\t\t0x0\t
 """
 FIELDS_TEXT = """"frame.number"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"
 "1"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
 "2"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
 """
-EVENT_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"
-"1"\t"1700000000.000000000"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
-"2"\t"1700000001.000000000"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
+EVENT_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"\t"dhcp.id"\t"dhcp.option.dhcp"
+"1"\t"1700000000.000000000"\t"0"\t"342"\t"342"\t"eth:ethertype:ip:udp:dhcp"\t"0x01020304"\t"1"
+"2"\t"1700000001.000000000"\t"0"\t"342"\t"342"\t"eth:ethertype:ip:udp:dhcp"\t"0x01020304"\t"5"
+"""
+IDENTITY_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.protocols"\t"dhcp.option.dhcp"\t"eth.src"\t"eth.dst"
+"1"\t"1700000000.000000000"\t"eth:ethertype:ip:udp:dhcp"\t"1"\t"02:00:00:00:00:10"\t"ff:ff:ff:ff:ff:ff"
+"2"\t"1700000001.000000000"\t"eth:ethertype:ip:udp:dhcp"\t"5"\t"02:00:00:00:00:20"\t"ff:ff:ff:ff:ff:ff"
 """
 
 
@@ -68,7 +76,10 @@ def write_bundle(root: Path, executable_content=b"binary"):
             },
         ],
     }
-    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
 
 
 class FakeProcess:
@@ -163,6 +174,7 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertIn("-c", inventory_arguments)
         self.assertNotIn("-i", inventory_arguments)
         self.assertNotIn("ip.src", inventory_arguments)
+        self.assertNotIn("eth.src", inventory_arguments)
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
     def test_nonzero_exit_never_exposes_stderr(self, popen):
@@ -198,11 +210,12 @@ class Phase4RuntimeTests(unittest.TestCase):
         )
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
-    def test_service_returns_identifier_free_inventory_stage_timeline_and_sessions(self, popen):
+    def test_service_returns_aliases_without_raw_identifiers(self, popen):
         root, vendor, capture, _workspace = self.setup_paths()
         popen.side_effect = [
             FakeProcess(CATALOG_TEXT.encode("utf-8")),
             FakeProcess(EVENT_FIELDS_TEXT.encode("utf-8")),
+            FakeProcess(IDENTITY_FIELDS_TEXT.encode("utf-8")),
         ]
 
         result = analyze_capture(
@@ -218,29 +231,69 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(result.protocol_inventory.event_correlation)
         self.assertIsNotNone(result.protocol_inventory.event_timeline)
         self.assertIsNotNone(result.protocol_inventory.transaction_sessions)
+        self.assertIsNotNone(result.protocol_inventory.device_sessions)
+
+        device_report = result.protocol_inventory.device_sessions
+        self.assertEqual(len(device_report.devices), 1)
+        self.assertEqual(device_report.devices[0].alias, "DEVICE-1")
+        self.assertEqual(
+            device_report.devices[0].linked_attempt_ids,
+            ("DHCP-1-A1",),
+        )
+        self.assertFalse(device_report.raw_identifiers_serialized)
+        self.assertFalse(device_report.alias_secret_persisted)
+        self.assertFalse(device_report.aliases_stable_across_runs)
+
         text = json.dumps(serialized, ensure_ascii=False)
-        self.assertNotIn(str(capture), text)
-        self.assertNotIn(capture.name, text)
-        self.assertNotIn("192.0.2", text)
-        self.assertNotIn("1700000000", text)
+        for forbidden in (
+            str(capture),
+            capture.name,
+            "192.0.2",
+            "1700000000",
+            "02:00:00:00:00:10",
+            "02:00:00:00:00:20",
+            "020000000010",
+        ):
+            self.assertNotIn(forbidden, text)
         self.assertEqual(serialized["schema_version"], 2)
         self.assertEqual(
             serialized["protocol_inventory"]["inventory"]["frames_observed"],
             2,
         )
         self.assertEqual(
-            serialized["protocol_inventory"]["event_correlation"]["frames_scanned"],
+            serialized["protocol_inventory"]["event_correlation"][
+                "frames_scanned"
+            ],
             2,
         )
         self.assertEqual(
-            serialized["protocol_inventory"]["event_timeline"]["frames_observed"],
+            serialized["protocol_inventory"]["event_timeline"][
+                "frames_observed"
+            ],
             2,
         )
         self.assertEqual(
-            serialized["protocol_inventory"]["transaction_sessions"]["attempts_total"],
-            0,
+            serialized["protocol_inventory"]["transaction_sessions"][
+                "attempts_total"
+            ],
+            1,
         )
-        self.assertEqual(popen.call_count, 2)
+        self.assertEqual(
+            serialized["protocol_inventory"]["device_sessions"][
+                "devices_total"
+            ],
+            1,
+        )
+        self.assertEqual(popen.call_count, 3)
+
+        event_arguments = popen.call_args_list[1].args[0]
+        identity_arguments = popen.call_args_list[2].args[0]
+        self.assertNotIn("eth.src", event_arguments)
+        self.assertNotIn("eth.dst", event_arguments)
+        self.assertIn("eth.src", identity_arguments)
+        self.assertIn("eth.dst", identity_arguments)
+        self.assertNotIn("ip.src", identity_arguments)
+        self.assertNotIn("dns.qry.name", identity_arguments)
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
     def test_corrupted_bundle_is_reported_without_execution(self, popen):
