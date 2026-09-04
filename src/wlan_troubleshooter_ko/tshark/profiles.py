@@ -1,4 +1,4 @@
-"""버전이 고정된 TShark 추출 프로파일 로더와 필드 호환성 해석."""
+"""Version-pinned TShark extraction profile loader and compatibility resolver."""
 
 from __future__ import annotations
 
@@ -31,15 +31,20 @@ _PROFILE_REQUIRED_OUTPUT_KEYS = {
         "frame_length",
         "protocols",
     },
+    "device-identities": {
+        "frame_number",
+        "time_epoch",
+        "protocols",
+    },
 }
 
 
 class FieldProfileError(ValueError):
-    """추출 프로파일이 스키마 또는 안전 정책을 충족하지 못한 경우."""
+    """The extraction profile violates the schema or safety policy."""
 
 
 class FieldCompatibilityError(RuntimeError):
-    """현재 TShark에 필수 필드가 등록되지 않은 경우."""
+    """The current TShark does not register a required field."""
 
 
 @dataclass(frozen=True)
@@ -110,7 +115,12 @@ def _reject_duplicate_keys(pairs):
 
 
 def _normalized_text(value: object, label: str, maximum: int = 256) -> str:
-    if not isinstance(value, str) or not value or len(value) > maximum or "\x00" in value:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > maximum
+        or "\x00" in value
+    ):
         raise FieldProfileError(label + " 형식이 올바르지 않습니다.")
     normalized = unicodedata.normalize("NFC", value)
     if normalized != value:
@@ -118,7 +128,11 @@ def _normalized_text(value: object, label: str, maximum: int = 256) -> str:
     return value
 
 
-def _exact_keys(value: object, expected: Iterable[str], label: str) -> Dict[str, object]:
+def _exact_keys(
+    value: object,
+    expected: Iterable[str],
+    label: str,
+) -> Dict[str, object]:
     if not isinstance(value, dict) or set(value) != set(expected):
         raise FieldProfileError(label + " 키 구성이 올바르지 않습니다.")
     return value
@@ -133,7 +147,9 @@ def _load_json(path: Path) -> Dict[str, object]:
     except FieldProfileError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
-        raise FieldProfileError("추출 프로파일 JSON을 안전하게 읽을 수 없습니다.") from None
+        raise FieldProfileError(
+            "추출 프로파일 JSON을 안전하게 읽을 수 없습니다."
+        ) from None
     if not isinstance(value, dict):
         raise FieldProfileError("추출 프로파일 루트는 객체여야 합니다.")
     return value
@@ -163,8 +179,14 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
             "추출 프로파일 항목",
         )
         profile_id = _normalized_text(profile_data["profile_id"], "프로파일 ID", 64)
-        filter_name = _normalized_text(profile_data["display_filter_name"], "필터 이름", 64)
-        if not _ID_PATTERN.fullmatch(profile_id) or not _ID_PATTERN.fullmatch(filter_name):
+        filter_name = _normalized_text(
+            profile_data["display_filter_name"],
+            "필터 이름",
+            64,
+        )
+        if not _ID_PATTERN.fullmatch(profile_id) or not _ID_PATTERN.fullmatch(
+            filter_name
+        ):
             raise FieldProfileError("프로파일 또는 필터 식별자가 올바르지 않습니다.")
         if profile_id not in _PROFILE_REQUIRED_OUTPUT_KEYS:
             raise FieldProfileError("승인되지 않은 추출 프로파일 ID입니다.")
@@ -191,11 +213,18 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
                 raise FieldProfileError("출력 키가 올바르지 않거나 중복됐습니다.")
             output_keys.add(output_key)
             candidates_value = field_data["candidates"]
-            if not isinstance(candidates_value, list) or not 1 <= len(candidates_value) <= 8:
+            if (
+                not isinstance(candidates_value, list)
+                or not 1 <= len(candidates_value) <= 8
+            ):
                 raise FieldProfileError("필드 후보 목록이 올바르지 않습니다.")
             candidates = []
             for candidate_value in candidates_value:
-                candidate = _normalized_text(candidate_value, "TShark 필드명", 128)
+                candidate = _normalized_text(
+                    candidate_value,
+                    "TShark 필드명",
+                    128,
+                )
                 if (
                     not _FIELD_PATTERN.fullmatch(candidate)
                     or candidate in candidates
@@ -209,13 +238,22 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
             required = field_data["required"]
             if type(required) is not bool:
                 raise FieldProfileError("필수 필드 표시는 불리언이어야 합니다.")
-            requirements.append(FieldRequirement(output_key, tuple(candidates), required))
-        required_keys = {item.output_key for item in requirements if item.required}
+            requirements.append(
+                FieldRequirement(output_key, tuple(candidates), required)
+            )
+        required_keys = {
+            item.output_key for item in requirements if item.required
+        }
         expected_required = _PROFILE_REQUIRED_OUTPUT_KEYS[profile_id]
         if not expected_required.issubset(required_keys):
             raise FieldProfileError("추출 프로파일 필수 출력 키가 누락됐습니다.")
         profiles.append(
-            ExtractionProfile(profile_id, filter_name, max_packets, tuple(requirements))
+            ExtractionProfile(
+                profile_id,
+                filter_name,
+                max_packets,
+                tuple(requirements),
+            )
         )
 
     if set(profile_ids) != set(_PROFILE_REQUIRED_OUTPUT_KEYS):
@@ -233,10 +271,20 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
             ("group_id", "label_ko", "tokens"),
             "프로토콜 그룹",
         )
-        group_id = _normalized_text(group_data["group_id"], "프로토콜 그룹 ID", 64)
-        label = _normalized_text(group_data["label_ko"], "프로토콜 그룹 표시명", 128)
+        group_id = _normalized_text(
+            group_data["group_id"],
+            "프로토콜 그룹 ID",
+            64,
+        )
+        label = _normalized_text(
+            group_data["label_ko"],
+            "프로토콜 그룹 표시명",
+            128,
+        )
         if not _ID_PATTERN.fullmatch(group_id) or group_id in group_ids:
-            raise FieldProfileError("프로토콜 그룹 ID가 올바르지 않거나 중복됐습니다.")
+            raise FieldProfileError(
+                "프로토콜 그룹 ID가 올바르지 않거나 중복됐습니다."
+            )
         group_ids.add(group_id)
         tokens_value = group_data["tokens"]
         if not isinstance(tokens_value, list) or not 1 <= len(tokens_value) <= 16:
@@ -252,7 +300,12 @@ def load_field_profiles(path: Path) -> FieldProfileRegistry:
             tokens.append(token)
         groups.append(ProtocolGroup(group_id, label, tuple(tokens)))
 
-    return FieldProfileRegistry(1, profile_version, tuple(profiles), tuple(groups))
+    return FieldProfileRegistry(
+        1,
+        profile_version,
+        tuple(profiles),
+        tuple(groups),
+    )
 
 
 def resolve_profile(

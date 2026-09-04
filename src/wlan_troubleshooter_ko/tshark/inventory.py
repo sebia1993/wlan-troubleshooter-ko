@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Tuple
 
+from wlan_troubleshooter_ko.analysis.device_sessions import (
+    DeviceSessionReport,
+    build_device_sessions,
+)
 from wlan_troubleshooter_ko.analysis.event_correlation import (
     EventCorrelation,
     build_event_correlation,
@@ -57,6 +61,7 @@ class _TSharkTextResult:
     bundle_version: str
     manifest_sha256: str
     text: str
+    capture: Optional[CaptureInfo] = None
 
 
 def _same_capture(first: CaptureInfo, second: CaptureInfo) -> bool:
@@ -100,8 +105,17 @@ def run_profile_fields_text(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
     max_stdout_bytes: int = 64 * 1024 * 1024,
+    expected_capture: Optional[CaptureInfo] = None,
 ) -> _TSharkTextResult:
+    """고정 프로파일을 실행하고 동일 캡처 지문을 실행 전후 보장한다."""
+
     initial_capture = validate_capture(capture_path, cancel_event=cancel_event)
+    if expected_capture is not None and not _same_capture(
+        expected_capture,
+        initial_capture,
+    ):
+        raise TSharkExecutionError("캡처 파일이 분석 단계 사이에 변경됐습니다.")
+
     before = verify_bundle(vendor_root)
     text = probe_bundle_runtime(
         vendor_root,
@@ -116,10 +130,21 @@ def run_profile_fields_text(
     after = verify_bundle(vendor_root)
     if after != before:
         raise TSharkExecutionError("TShark 번들이 프로토콜 검사 중 변경됐습니다.")
+
     final_capture = validate_capture(capture_path, cancel_event=cancel_event)
     if not _same_capture(initial_capture, final_capture):
         raise TSharkExecutionError("캡처 파일이 프로토콜 검사 중 변경됐습니다.")
-    return _TSharkTextResult(after.version, after.manifest_sha256, text)
+    if expected_capture is not None and not _same_capture(
+        expected_capture,
+        final_capture,
+    ):
+        raise TSharkExecutionError("캡처 파일이 분석 단계 사이에 변경됐습니다.")
+    return _TSharkTextResult(
+        after.version,
+        after.manifest_sha256,
+        text,
+        final_capture,
+    )
 
 
 @dataclass(frozen=True)
@@ -141,7 +166,7 @@ class PreparedProtocolInventoryInvocation:
 
 @dataclass(frozen=True)
 class ProtocolInventoryRun:
-    """실제 TShark 실행에서 정규화된 식별자 없는 분석 결과."""
+    """실제 TShark 실행에서 정규화된 공개 분석 결과."""
 
     bundle_version: str
     manifest_sha256: str
@@ -151,6 +176,7 @@ class ProtocolInventoryRun:
     event_correlation: Optional[EventCorrelation] = None
     event_timeline: Optional[EventTimeline] = None
     transaction_sessions: Optional[TransactionSessionReport] = None
+    device_sessions: Optional[DeviceSessionReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -167,14 +193,15 @@ class ProtocolInventoryRun:
                 else self.event_correlation.to_dict()
             ),
             "event_timeline": (
-                None
-                if self.event_timeline is None
-                else self.event_timeline.to_dict()
+                None if self.event_timeline is None else self.event_timeline.to_dict()
             ),
             "transaction_sessions": (
                 None
                 if self.transaction_sessions is None
                 else self.transaction_sessions.to_dict()
+            ),
+            "device_sessions": (
+                None if self.device_sessions is None else self.device_sessions.to_dict()
             ),
         }
 
@@ -185,7 +212,9 @@ def adapt_connection_profile_for_timeline(
     """기존 접속 분석 출력 키를 타임라인 모델의 비식별 키로 변환한다."""
 
     if profile.profile_id != "connection-events":
-        raise TSharkExecutionError("접속 이벤트 프로파일만 타임라인으로 변환할 수 있습니다.")
+        raise TSharkExecutionError(
+            "접속 이벤트 프로파일만 타임라인으로 변환할 수 있습니다."
+        )
     fields = tuple(
         ResolvedField(
             _TIMELINE_OUTPUT_KEY_ALIASES.get(item.output_key, item.output_key),
@@ -259,7 +288,7 @@ def _catalog_and_profile(
     profile_id: str,
     timeout_seconds: int,
     cancel_event: Optional[threading.Event],
-) -> Tuple[object, FieldCatalog, ResolvedProfile]:
+) -> Tuple[object, FieldCatalog, ResolvedProfile, _TSharkTextResult]:
     registry = load_field_profiles(profile_path)
     catalog_result = run_field_catalog_text(
         vendor_root,
@@ -269,7 +298,53 @@ def _catalog_and_profile(
     )
     catalog = parse_field_catalog(catalog_result.text.splitlines(keepends=True))
     resolved_profile = resolve_profile(registry, catalog, profile_id)
-    return registry, catalog, resolved_profile
+    return registry, catalog, resolved_profile, catalog_result
+
+
+def _same_verified_runtime(
+    first: _TSharkTextResult,
+    second: _TSharkTextResult,
+) -> bool:
+    return (
+        first.bundle_version == second.bundle_version
+        and first.manifest_sha256 == second.manifest_sha256
+    )
+
+
+def _same_verified_capture(
+    first: _TSharkTextResult,
+    second: _TSharkTextResult,
+) -> bool:
+    return (
+        first.capture is not None
+        and second.capture is not None
+        and _same_capture(first.capture, second.capture)
+    )
+
+
+def _prepare_device_link_transactions(
+    report: TransactionSessionReport,
+) -> Tuple[TransactionSessionReport, int]:
+    """생략된 근거가 있는 거래는 단말 연결 입력에서 근거를 제거한다."""
+
+    attempts = []
+    incomplete_evidence = 0
+    for attempt in report.attempts:
+        omitted = attempt.evidence_frames_omitted
+        if type(omitted) is not int or omitted < 0:
+            raise TSharkExecutionError("거래 시도 근거 생략 수가 올바르지 않습니다.")
+        if omitted:
+            incomplete_evidence += 1
+            attempts.append(
+                replace(
+                    attempt,
+                    evidence_frames=(),
+                    display_filter="",
+                )
+            )
+        else:
+            attempts.append(attempt)
+    return replace(report, attempts=tuple(attempts)), incomplete_evidence
 
 
 def run_protocol_inventory(
@@ -291,7 +366,7 @@ def run_protocol_inventory(
     ):
         raise TSharkExecutionError("예상 프레임 수가 올바르지 않습니다.")
 
-    registry, catalog, resolved_profile = _catalog_and_profile(
+    registry, catalog, resolved_profile, catalog_result = _catalog_and_profile(
         vendor_root,
         workspace_root,
         profile_path,
@@ -307,6 +382,10 @@ def run_protocol_inventory(
         timeout_seconds=timeout_seconds,
         cancel_event=cancel_event,
     )
+    if not _same_verified_runtime(catalog_result, fields_result):
+        raise TSharkExecutionError(
+            "TShark 번들이 필드 검사와 프로토콜 검사 사이에 변경됐습니다."
+        )
 
     inventory = build_protocol_inventory(
         fields_result.text,
@@ -332,10 +411,11 @@ def run_connection_analysis(
     *,
     expected_frames: Optional[int],
     has_80211_link_type: bool,
+    expected_capture: Optional[CaptureInfo] = None,
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> ProtocolInventoryRun:
-    """한 번의 fields 출력에서 인벤토리·Finding·타임라인·거래 시도를 만든다."""
+    """한 번의 일반 출력과 전용 가명화 출력에서 공개 분석 결과를 만든다."""
 
     if not workspace_root.is_dir():
         raise TSharkExecutionError("접속 단계 분석 작업공간이 준비되지 않았습니다.")
@@ -344,7 +424,7 @@ def run_connection_analysis(
     ):
         raise TSharkExecutionError("예상 프레임 수가 올바르지 않습니다.")
 
-    registry, catalog, resolved_profile = _catalog_and_profile(
+    registry, catalog, resolved_profile, catalog_result = _catalog_and_profile(
         vendor_root,
         workspace_root,
         profile_path,
@@ -352,6 +432,8 @@ def run_connection_analysis(
         timeout_seconds,
         cancel_event,
     )
+    identity_profile = resolve_profile(registry, catalog, "device-identities")
+
     fields_result = run_profile_fields_text(
         vendor_root,
         capture_path,
@@ -359,7 +441,12 @@ def run_connection_analysis(
         resolved_profile,
         timeout_seconds=timeout_seconds,
         cancel_event=cancel_event,
+        expected_capture=expected_capture,
     )
+    if not _same_verified_runtime(catalog_result, fields_result):
+        raise TSharkExecutionError(
+            "TShark 번들이 필드 검사와 접속 단계 검사 사이에 변경됐습니다."
+        )
 
     inventory = build_protocol_inventory(
         fields_result.text,
@@ -380,6 +467,49 @@ def run_connection_analysis(
         expected_frames=expected_frames,
     )
     transaction_sessions = build_transaction_sessions(timeline)
+    link_transactions, incomplete_attempt_evidence = (
+        _prepare_device_link_transactions(transaction_sessions)
+    )
+
+    identity_result = run_profile_fields_text(
+        vendor_root,
+        capture_path,
+        workspace_root / "device-identities",
+        identity_profile,
+        timeout_seconds=timeout_seconds,
+        cancel_event=cancel_event,
+        expected_capture=expected_capture,
+    )
+    if not _same_verified_runtime(fields_result, identity_result):
+        raise TSharkExecutionError(
+            "TShark 번들이 접속 단계 검사와 단말 가명화 검사 사이에 변경됐습니다."
+        )
+    if not _same_verified_capture(fields_result, identity_result):
+        raise TSharkExecutionError(
+            "접속 단계 분석과 단말 가명화 분석의 캡처 지문이 다릅니다."
+        )
+
+    device_sessions = build_device_sessions(
+        identity_result.text,
+        identity_profile,
+        link_transactions,
+        expected_frames=expected_frames,
+    )
+    if incomplete_attempt_evidence:
+        device_sessions = replace(
+            device_sessions,
+            complete=False,
+            cautions=(
+                "근거 프레임이 일부 생략된 거래 시도는 단말에 연결하지 않았습니다.",
+                *device_sessions.cautions,
+            ),
+        )
+
+    # Raw L2 identifiers exist only in the transient identity output. The
+    # returned dataclasses contain aliases and packet evidence only.
+    del identity_result
+    del link_transactions
+
     return ProtocolInventoryRun(
         bundle_version=fields_result.bundle_version,
         manifest_sha256=fields_result.manifest_sha256,
@@ -389,4 +519,5 @@ def run_connection_analysis(
         event_correlation=correlation,
         event_timeline=timeline,
         transaction_sessions=transaction_sessions,
+        device_sessions=device_sessions,
     )
