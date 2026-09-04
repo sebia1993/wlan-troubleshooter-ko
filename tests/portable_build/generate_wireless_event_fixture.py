@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a synthetic IEEE 802.11 PCAP for the Portable event test."""
+"""Generate a synthetic Radiotap plus IEEE 802.11 PCAP for Portable tests."""
 
 from __future__ import annotations
 
@@ -11,6 +11,12 @@ from typing import Iterable, Sequence, Tuple
 
 STATION = bytes.fromhex("0200000000a1")
 ACCESS_POINT = bytes.fromhex("0200000000b1")
+
+
+def _radiotap_header() -> bytes:
+    """Return a valid minimal Radiotap header with no optional fields."""
+
+    return struct.pack("<BBHI", 0, 0, 8, 0)
 
 
 def _management_header(
@@ -122,8 +128,10 @@ def frames() -> Iterable[Tuple[int, bytes]]:
 
 def build_pcap() -> bytes:
     output = bytearray(bytes.fromhex("d4c3b2a1"))
-    output += struct.pack("<HHiIII", 2, 4, 0, 0, 65535, 105)
-    for timestamp, frame in frames():
+    output += struct.pack("<HHiIII", 2, 4, 0, 0, 65535, 127)
+    radiotap = _radiotap_header()
+    for timestamp, dot11_frame in frames():
+        frame = radiotap + dot11_frame
         output += struct.pack(
             "<IIII",
             1_700_000_100 + timestamp,
