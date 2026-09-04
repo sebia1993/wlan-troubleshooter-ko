@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   portable:
-    name: Build and verify Win64 portable device-alias package
+    name: Build and verify Win64 portable device-journey package
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 100
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -70,4 +70,5 @@ jobs:
           ./tests/portable_build/verify_event_timeline.ps1 -PackageOutputPath $Package -PythonPath python
           ./tests/portable_build/verify_transaction_sessions.ps1 -PackageOutputPath $Package -PythonPath python
           ./tests/portable_build/verify_device_sessions.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/verify_device_journeys.ps1 -PackageOutputPath $Package -PythonPath python
           Get-Content -LiteralPath $Package
