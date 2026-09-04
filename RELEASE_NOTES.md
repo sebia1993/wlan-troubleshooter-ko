@@ -80,9 +80,9 @@ TShark는 승인된 고정 인자와 필드만 사용합니다. 출력 크기, �
 
 릴리즈 빌드는 Python 환경변수와 일반 Python PATH를 제거한 상태에서 최종 `WlanTroubleshooterKO.exe`를 실행합니다.
 
-첫 번째 합성 Ethernet PCAP에서는 EAP Request·Response·Success, RADIUS Access-Request·Access-Accept, DHCP Discover·Offer·Request·ACK, DNS Query·정상 Response, ARP Request·Reply와 TCP SYN·SYN/ACK·RST를 확인합니다.
+첫 번째 합성 Ethernet PCAP에서는 EAPOL 외피, RADIUS Access-Request·Access-Accept, DHCP Discover·Offer·Request·ACK, DNS Query·정상 Response, ARP Request·Reply와 TCP SYN·SYN/ACK·RST를 확인합니다.
 
-두 번째 IEEE 802.11 PCAP에서는 무선 인증 요청·성공 응답, Association 요청·성공 응답, EAP Request·Response·Success와 Deauthentication을 확인합니다.
+두 번째 IEEE 802.11 PCAP에서는 무선 인증 요청·성공 응답, Association 요청·성공 응답, EAP Request·Response·Success와 Deauthentication을 확인합니다. EAP 실분석은 실제 무선 데이터 프레임 내부의 EAPOL/EAP 구조에서 검증합니다.
 
 두 분석 모두 결과 JSON에 캡처 경로·파일명·IP·MAC·원본 거래 ID·절대 epoch가 포함되지 않는지, 분석 전후 Portable 폴더가 변경되지 않는지도 검사합니다.
 
