@@ -25,7 +25,7 @@ jobs:
     name: Validate, build, test, and publish Win64 Portable
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 140
+    timeout-minutes: 150
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -98,6 +98,7 @@ jobs:
           ./tests/portable_build/verify_capture_observability.ps1 -PackageOutputPath $PackagePath -PythonPath python
           ./tests/portable_build/verify_eapol_handshakes.ps1 -PackageOutputPath $PackagePath -PythonPath python
           ./tests/portable_build/verify_eapol_replay_relations.ps1 -PackageOutputPath $PackagePath -PythonPath python
+          ./tests/portable_build/verify_pcapng_interface_statistics.ps1 -PackageOutputPath $PackagePath -PythonPath python
           $Package = Get-Content -LiteralPath $PackagePath -Raw | ConvertFrom-Json
           foreach ($Name in @("archive", "archive_checksum", "wireshark_source", "wireshark_source_checksum", "observed_supply_chain")) {
               $Value = [string]$Package.$Name
@@ -156,5 +157,5 @@ jobs:
           "- Tag: ${{ steps.metadata.outputs.tag }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "- ZIP bytes: ${{ steps.package.outputs.archive_size_bytes }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           ("- ZIP SHA-256: " + '${{ steps.package.outputs.archive_sha256 }}') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "- Portable existing Finding, event, transaction, DEVICE-N journey, observability, and EAPOL sequence gates: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "- Portable EAPOL Replay Counter relationship-only integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Portable existing Finding, event, transaction, DEVICE-N journey, observability, EAPOL sequence, and Replay relation gates: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Portable PCAPNG Interface Statistics conservative integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
