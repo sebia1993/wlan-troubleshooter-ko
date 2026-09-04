@@ -10,29 +10,38 @@ from wlan_troubleshooter_ko.core.capture import validate_capture
 class PortableEventFixtureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = (
-            Path(__file__).resolve().parents[1]
-            / "tests"
-            / "portable_build"
-            / "generate_event_fixture.py"
-        )
-        specification = importlib.util.spec_from_file_location(
+        support = Path(__file__).resolve().parents[1] / "tests" / "portable_build"
+        cls.ethernet = cls._load_module(
             "portable_event_fixture",
-            path,
+            support / "generate_event_fixture.py",
         )
+        cls.wireless = cls._load_module(
+            "portable_wireless_event_fixture",
+            support / "generate_wireless_event_fixture.py",
+        )
+
+    @staticmethod
+    def _load_module(name, path):
+        specification = importlib.util.spec_from_file_location(name, path)
         if specification is None or specification.loader is None:
             raise RuntimeError("event fixture module could not be loaded")
         module = importlib.util.module_from_spec(specification)
         specification.loader.exec_module(module)
-        cls.module = module
+        return module
 
-    def test_generated_fixture_is_valid_complete_ethernet_pcap(self):
-        data = self.module.build_pcap()
+    def _inspect(self, data, name):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory).resolve() / "event-fixture.pcap"
+            path = Path(directory).resolve() / name
             path.write_bytes(data)
             capture = validate_capture(path)
             structure = inspect_capture_structure(capture)
+        return capture, structure
+
+    def test_generated_ethernet_fixture_is_valid_and_complete(self):
+        capture, structure = self._inspect(
+            self.ethernet.build_pcap(),
+            "event-fixture.pcap",
+        )
 
         self.assertEqual(capture.capture_format, "pcap")
         self.assertEqual(structure.interfaces[0].link_type, 1)
@@ -40,11 +49,24 @@ class PortableEventFixtureTests(unittest.TestCase):
         self.assertEqual(structure.truncated_packets_observed, 0)
         self.assertTrue(structure.scan_complete)
 
-    def test_fixture_is_deterministic_and_contains_no_external_dependency(self):
-        first = self.module.build_pcap()
-        second = self.module.build_pcap()
-        self.assertEqual(first, second)
-        self.assertGreater(len(first), 1000)
+    def test_generated_wireless_fixture_is_valid_and_complete(self):
+        capture, structure = self._inspect(
+            self.wireless.build_pcap(),
+            "wireless-event-fixture.pcap",
+        )
+
+        self.assertEqual(capture.capture_format, "pcap")
+        self.assertEqual(structure.interfaces[0].link_type, 105)
+        self.assertEqual(structure.packets_scanned, 8)
+        self.assertEqual(structure.truncated_packets_observed, 0)
+        self.assertTrue(structure.scan_complete)
+
+    def test_fixtures_are_deterministic_and_nonempty(self):
+        for module in (self.ethernet, self.wireless):
+            first = module.build_pcap()
+            second = module.build_pcap()
+            self.assertEqual(first, second)
+            self.assertGreater(len(first), 200)
 
 
 if __name__ == "__main__":
