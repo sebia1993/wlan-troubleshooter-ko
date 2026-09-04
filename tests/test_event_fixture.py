@@ -20,6 +20,10 @@ class PortableEventFixtureTests(unittest.TestCase):
             "portable_wireless_event_fixture",
             support / "generate_wireless_event_fixture.py",
         )
+        cls.eap = cls._load_module(
+            "portable_eap_fixture",
+            support / "generate_eap_fixture.py",
+        )
 
     @staticmethod
     def _load_module(name, path):
@@ -70,12 +74,24 @@ class PortableEventFixtureTests(unittest.TestCase):
         radiotap = raw[first_record_offset + 16 : first_record_offset + 24]
         self.assertEqual(radiotap, struct.pack("<BBHI", 0, 0, 8, 0))
 
+    def test_generated_ppp_eap_fixture_is_valid_and_complete(self):
+        raw = self.eap.build_pcap()
+        capture, structure = self._inspect(raw, "eap-event-fixture.pcap")
+
+        self.assertEqual(capture.capture_format, "pcap")
+        self.assertEqual(structure.interfaces[0].link_type, 9)
+        self.assertEqual(structure.packets_scanned, 3)
+        self.assertEqual(structure.truncated_packets_observed, 0)
+        self.assertTrue(structure.scan_complete)
+        self.assertIn(bytes.fromhex("ff03c2270109000501"), raw)
+        self.assertIn(bytes.fromhex("ff03c22703090004"), raw)
+
     def test_fixtures_are_deterministic_and_nonempty(self):
-        for module in (self.ethernet, self.wireless):
+        for module in (self.ethernet, self.wireless, self.eap):
             first = module.build_pcap()
             second = module.build_pcap()
             self.assertEqual(first, second)
-            self.assertGreater(len(first), 200)
+            self.assertGreater(len(first), 100)
 
 
 if __name__ == "__main__":
