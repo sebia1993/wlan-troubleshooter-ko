@@ -1,0 +1,114 @@
+name: Phase 4E Completion Gate
+
+on:
+  push:
+    branches:
+      - chatgpt/phase-4e-device-aliases
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: phase4e-completion-gate
+  cancel-in-progress: true
+
+jobs:
+  complete:
+    name: Validate, clean temporary workflows, and merge
+    runs-on: windows-latest
+    timeout-minutes: 100
+    env:
+      PYTHONHASHSEED: "0"
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      PYTHONPATH: src
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out Phase 4E branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chatgpt/phase-4e-device-aliases
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python 3.13 x64
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+          architecture: x64
+
+      - name: Require the non-unicast address safety fix
+        shell: pwsh
+        run: |
+          $Source = Get-Content -LiteralPath src/wlan_troubleshooter_ko/analysis/device_sessions.py -Raw
+          if (-not $Source.Contains("PHASE4E_NON_UNICAST_PRECHECK")) {
+              throw "The Phase 4E non-unicast address precheck is not present."
+          }
+
+      - name: Run complete offline validation
+        shell: pwsh
+        run: ./scripts/verify_offline.ps1 -PythonPath python
+
+      - name: Read pinned build toolchain
+        id: supply
+        shell: pwsh
+        run: |
+          $Value = Get-Content -LiteralPath tests/portable_build/supply-chain.json -Raw | ConvertFrom-Json
+          if ($Value.wireshark.msi.sha256 -eq "DISCOVER" -or $Value.wireshark.source.sha256 -eq "DISCOVER") {
+              throw "Wireshark supply-chain hashes must be pinned."
+          }
+          "pyinstaller=$($Value.pyinstaller_version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install exact build-only packages
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --no-input --no-deps -r tests/portable_build/requirements-build.txt
+          python -m pip check
+          if ((python -m PyInstaller --version).Trim() -ne '${{ steps.supply.outputs.pyinstaller }}') {
+              throw "PyInstaller version does not match the pinned value."
+          }
+
+      - name: Build and run every Portable integration gate
+        shell: pwsh
+        run: |
+          $Output = Join-Path $env:RUNNER_TEMP "phase4e-completion-package"
+          $Package = Join-Path $Output "package-output.json"
+          ./tests/portable_build/build_portable.ps1 -Mode Build -PythonPath python -OutputDirectory $Output
+          ./tests/portable_build/finalize_portable.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/inspect_eap_runtime.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/verify_protocol_inventory.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/verify_event_timeline.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/verify_transaction_sessions.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/verify_device_sessions.ps1 -PackageOutputPath $Package -PythonPath python
+          $Value = Get-Content -LiteralPath $Package -Raw | ConvertFrom-Json -Depth 64
+          "PHASE4E_ARCHIVE_SHA256=$($Value.archive_sha256)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PHASE4E_ARCHIVE_BYTES=$($Value.archive_size_bytes)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Remove one-off diagnostic workflows from the release branch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          $Temporary = @(
+              ".github/workflows/phase4e-safe-diagnostic.yml",
+              ".github/workflows/phase4e-unicast-address-fix.yml",
+              ".github/workflows/phase4e-completion.yml"
+          )
+          foreach ($Path in $Temporary) {
+              if (Test-Path -LiteralPath $Path -PathType Leaf) {
+                  git rm -- $Path
+              }
+          }
+          if (git status --porcelain) {
+              git commit -m "Phase 4E 일회성 진단·자동 패치 워크플로 제거"
+              git push origin HEAD:chatgpt/phase-4e-device-aliases
+          }
+
+      - name: Mark PR ready and merge the fully validated product change
+        shell: pwsh
+        run: |
+          gh pr ready 9 --repo $env:GITHUB_REPOSITORY
+          gh pr merge 9 --repo $env:GITHUB_REPOSITORY --merge --subject "Phase 4E 분석 실행별 단말·AP 가명화 (#9)" --body "분석 실행마다 새 HMAC 비밀값을 사용해 DEVICE-N·AP-N 가명을 생성하고, 원본 L2 식별자를 결과·로그·파일에 남기지 않습니다. 비단말 브로드캐스트·멀티캐스트 주소는 단말 후보에서 제외합니다. 전체 오프라인 검증과 Python·Wireshark 없는 Portable 실제 패킷 검증을 통과했습니다. 후보 ZIP SHA-256: $env:PHASE4E_ARCHIVE_SHA256, bytes: $env:PHASE4E_ARCHIVE_BYTES."
