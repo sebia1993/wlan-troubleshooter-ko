@@ -6,7 +6,6 @@ from wlan_troubleshooter_ko.tshark.policy import (
     APPROVED_FIELDS,
     TSharkPolicyError,
     assert_safe_profile_argv,
-    build_profile_argv,
 )
 from wlan_troubleshooter_ko.tshark.profiles import load_field_profiles, resolve_profile
 
@@ -47,7 +46,7 @@ class EventProfilePolicyTests(unittest.TestCase):
         )
 
     def test_event_profile_has_no_address_identity_or_payload_field(self):
-        profile = self.registry.get_profile("event-timeline")
+        profile = self.registry.get_profile("connection-events")
         candidates = [
             candidate
             for requirement in profile.fields
@@ -56,8 +55,11 @@ class EventProfilePolicyTests(unittest.TestCase):
         rendered = "\n".join(candidates).casefold()
         for fragment in SENSITIVE_FIELD_FRAGMENTS:
             self.assertNotIn(fragment, rendered)
-        self.assertEqual(len(profile.fields), 31)
-        self.assertEqual(self.registry.profile_version, "0.3.0")
+        self.assertEqual(len(profile.fields), 32)
+        self.assertEqual(self.registry.profile_version, "0.4.0")
+        self.assertIn("wlan.fc.retry", candidates)
+        self.assertIn("wlan_rsna_eapol.keydes.msgnr", candidates)
+        self.assertIn("tls.handshake.type", candidates)
 
     def test_every_profile_candidate_is_explicitly_approved(self):
         approved = set(APPROVED_FIELDS)
@@ -67,7 +69,7 @@ class EventProfilePolicyTests(unittest.TestCase):
                     self.assertIn(candidate, approved)
 
     def test_event_profile_required_fields_are_minimal_metadata(self):
-        profile = self.registry.get_profile("event-timeline")
+        profile = self.registry.get_profile("connection-events")
         required = {
             requirement.output_key
             for requirement in profile.fields
@@ -95,20 +97,18 @@ class EventProfilePolicyTests(unittest.TestCase):
                 )
             )
         catalog = parse_field_catalog(catalog_lines)
-        profile = resolve_profile(self.registry, catalog, "event-timeline")
+        profile = resolve_profile(self.registry, catalog, "connection-events")
 
-        class Bundle:
-            executable = Path("C:/portable/vendor/wireshark/tshark.exe")
-
-        # build_profile_argv validates the real capture path, so only the
-        # completed argv validator is tested here with a structurally valid
-        # approved command skeleton.
+        executable = (
+            Path.cwd() / "portable" / "vendor" / "wireshark" / "tshark.exe"
+        ).resolve()
+        capture = (Path.cwd() / "capture" / "test.pcap").resolve()
         arguments = [
-            str(Bundle.executable),
+            str(executable),
             "-n",
             "-2",
             "-r",
-            "C:/capture/test.pcap",
+            str(capture),
             "-c",
             str(profile.max_packets),
             "-T",
