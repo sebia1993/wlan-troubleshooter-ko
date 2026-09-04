@@ -17,7 +17,7 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "4E")
+        self.assertEqual(result["phase"], "4F")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["ruleset_version"], "0.2.0")
@@ -28,11 +28,13 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["identity_field_count"], "13")
         self.assertEqual(result["transaction_session_schema_version"], "1")
         self.assertEqual(result["device_session_schema_version"], "1")
+        self.assertEqual(result["device_journey_schema_version"], "1")
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
-        self.assertIn("단말·AP 가명", result["analysis_features"])
+        self.assertIn("단말 가명별 관찰 여정", result["analysis_features"])
         self.assertIn("HMAC 키 미저장", result["identity_privacy"])
+        self.assertIn("교차 프로토콜 세션 미확정", result["identity_privacy"])
 
     def test_self_check_can_write_new_local_json_for_windowed_exe(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -42,9 +44,10 @@ class AppSmokeTests(unittest.TestCase):
             value = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(value["network_features"], "없음")
             self.assertEqual(value["python_external_required"], "true")
-            self.assertEqual(value["phase"], "4E")
+            self.assertEqual(value["phase"], "4F")
             self.assertEqual(value["identity_field_count"], "13")
             self.assertEqual(value["device_session_schema_version"], "1")
+            self.assertEqual(value["device_journey_schema_version"], "1")
             with self.assertRaises(FileExistsError):
                 main(["--self-check-output=" + str(output)])
 
@@ -89,8 +92,9 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertTrue(state.valid)
             self.assertIn("캡처 유형 추정", state.detail)
-            self.assertIn("프로토콜·접속 단계·이벤트·거래·단말 가명 분석", state.detail)
+            self.assertIn("프로토콜·접속 단계·이벤트·거래·단말 가명·여정 분석", state.detail)
             self.assertIn("단말 가명", state.detail)
+            self.assertIn("여정", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)

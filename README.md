@@ -1,23 +1,23 @@
 # wlan-troubleshooter-ko
 
-Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 분석하여, 초급 네트워크 엔지니어에게 **접속 단계, 확인된 실패 응답, 시간순 이벤트, 프로토콜 거래 시도와 분석 실행별 단말·AP 가명**을 쉬운 한국어로 안내하는 도구입니다.
+Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 분석하여, 초급 네트워크 엔지니어에게 **캡처 품질, 접속 단계, 명시적 실패, 비식별 거래, 분석 실행별 단말·AP 가명과 단말별 관찰 여정**을 한국어로 안내하는 도구입니다.
 
-AI로 원인을 생성하지 않습니다. 프로그램 런타임에는 외부 API, 인터넷 통신, 텔레메트리, 자동 업데이트와 온라인 조회가 없습니다.
+AI·LLM·Ollama·외부 API·인터넷 조회·텔레메트리·자동 업데이트를 사용하지 않습니다.
 
 ## 가장 쉬운 실행 방법
 
-`v0.8.0-alpha.1` 릴리즈에서 다음 파일을 받습니다.
+`v0.9.0-alpha.1` 릴리스에서 다음 파일을 받습니다.
 
 ```text
-WlanTroubleshooterKO-v0.8.0-alpha.1-win64-portable.zip
+WlanTroubleshooterKO-v0.9.0-alpha.1-win64-portable.zip
 ```
 
 1. ZIP을 로컬 폴더에 완전히 압축 해제합니다.
-2. 압축을 푼 폴더의 `WlanTroubleshooterKO.exe`를 실행합니다.
+2. `WlanTroubleshooterKO.exe`를 실행합니다.
 3. `PCAP 또는 PCAPNG 파일 선택`을 누릅니다.
-4. 사전 점검, Finding, 이벤트·거래 시도와 `DEVICE-N`·`AP-N` 결과를 확인합니다.
+4. 사전 점검부터 `DEVICE-N`별 관찰 여정까지 확인합니다.
 
-ZIP 안에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.js, 관리자 권한과 인터넷 연결은 필요하지 않습니다.
+ZIP 내부에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.js, 관리자 권한과 인터넷 연결은 필요하지 않습니다.
 
 ## 분석 결과 구성
 
@@ -26,13 +26,15 @@ ZIP 안에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.j
 - PCAP·PCAPNG 형식과 바이트 순서
 - 인터페이스 수와 Link Type
 - Snap Length와 패킷 레코드 수
-- 잘린 패킷과 일부 스캔 여부
+- 잘린 패킷과 일부 처리 여부
 - Radiotap 또는 IEEE 802.11 Link Type 존재 여부
-- 현재 캡처에서 확인 가능한 항목과 확인할 수 없는 항목
+- 현재 캡처에서 확인할 수 없는 항목
 
 ### 2. 프로토콜 존재 인벤토리
 
 내장 TShark가 Radiotap, IEEE 802.11, EAPOL, EAP, RADIUS, DHCP, DNS, ARP, TCP, TLS, ICMP와 QUIC의 프레임 수 및 처음·마지막 프레임을 표시합니다.
+
+프로토콜이 관찰됐다는 사실만으로 성공을 확정하지 않고, 보이지 않았다는 사실만으로 장애를 확정하지 않습니다.
 
 ### 3. 접속 단계 요약
 
@@ -40,7 +42,7 @@ ZIP 안에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.j
 
 ```text
 무선 연결
-802.1X 시작·키 교환
+802.1X·EAPOL
 EAP 인증
 RADIUS 인증 서버
 DHCP 주소 할당
@@ -51,33 +53,33 @@ TCP 연결
 
 ### 4. 근거 기반 Finding
 
-명시적인 패킷 실패 코드가 있는 경우 다음 Finding을 생성합니다.
+명시적인 패킷 결과가 있을 때만 Finding을 만듭니다.
 
-| Finding | 명시적 근거 |
+| Finding | 패킷 근거 |
 |---|---|
 | 무선 연결 거부 | Association/Reassociation 상태 코드가 0이 아님 |
-| EAP 인증 실패 | EAP Failure, Code 4 |
-| RADIUS 인증 거부 | Access-Reject, Code 3 |
-| DHCP 주소 거부 | DHCP NAK, Message Type 6 |
+| EAP 인증 실패 | EAP Failure |
+| RADIUS 인증 거부 | Access-Reject |
+| DHCP 주소 거부 | DHCP NAK |
 | DNS 오류 | 응답 RCODE가 0이 아님 |
-| TCP 연결 재설정 | TCP RST 플래그가 설정됨 |
+| TCP 연결 재설정 | TCP RST |
 
-Finding에는 등급, 설명, 근거 프레임, `frame.number` Display Filter와 다음 점검 항목이 포함됩니다. Deauthentication·Disassociation과 TCP 재전송은 `참고`로만 표시합니다.
+Finding에는 설명, 근거 프레임, `frame.number` Display Filter와 다음 점검 항목이 포함됩니다. Deauthentication·Disassociation과 TCP 재전송은 참고 근거로만 사용합니다.
 
 ### 5. 비식별 이벤트 타임라인
 
-802.11·EAPOL·EAP·RADIUS·DHCP·DNS·ARP·TCP·TLS 이벤트를 캡처 시작 기준 상대 시간 순으로 표시합니다.
+802.11·EAPOL·EAP·RADIUS·DHCP·DNS·ARP·TCP·TLS 이벤트를 캡처 시작 기준 상대 시간 순으로 정리합니다.
 
 ```text
-+1,245ms · 프레임 #44 · DHCP ACK · 상관 별칭 DHCP-1 · 코드 5
++1,245ms · 프레임 #44 · DHCP ACK · DHCP-1
 Wireshark 필터: frame.number == 44
 ```
 
-상관 별칭은 원본 거래 ID나 TShark Stream 번호가 아니라 해당 분석 안에서만 사용하는 순번입니다.
+절대 시각과 원본 거래 ID는 결과에 기록하지 않습니다.
 
 ### 6. 비식별 프로토콜 거래 시도
 
-동일 프로토콜의 이벤트를 다음과 같이 시도 단위로 묶습니다.
+동일 프로토콜의 요청·중간 이벤트·최종 응답을 시도 단위로 묶습니다.
 
 ```text
 EAP-1-A1
@@ -87,19 +89,19 @@ DNS-1-A1
 TCP-1-A1
 ```
 
-| 프로토콜 | 필요 순서 완료 기준 |
+| 프로토콜 | 완료 관찰 기준 |
 |---|---|
 | EAP | Request → Response → Success |
 | RADIUS | Access-Request → Access-Accept |
 | DHCP | Discover → Offer → Request → ACK |
 | DNS | Query → 정상 Response |
-| TCP | 최종 ACK를 안전하게 구분하지 않으므로 완전 완료 상태를 만들지 않음 |
+| TCP | 최종 ACK를 안전하게 구분하지 않으므로 완료 확정 안 함 |
 
-거래는 `필요 순서 완료 관찰`, `성공 결과만 관찰`, `실패 결과 관찰`, `성공·실패 혼재`, `최종 결과 미확인`으로 구분합니다.
+거래 상태는 `complete`, `success-observed`, `failure-observed`, `mixed`, `incomplete`로 구분합니다.
 
 ### 7. 분석 실행별 단말·AP 가명
 
-Phase 4E는 원본 MAC·BSSID를 보고서에 표시하지 않고 다음 임시 가명을 만듭니다.
+원본 MAC·BSSID를 공개 결과에 기록하지 않고 현재 분석 실행에서만 유효한 가명을 만듭니다.
 
 ```text
 DEVICE-1
@@ -108,146 +110,150 @@ AP-1
 AP-2
 ```
 
-예시:
+가명화 원칙:
+
+- 실행마다 운영체제 CSPRNG로 32바이트 비밀키 생성
+- HMAC-SHA-256 내부 토큰 사용
+- 원본 MAC·BSSID, HMAC 토큰과 비밀키 미직렬화
+- 키를 파일·로그·레지스트리·환경변수에 저장하지 않음
+- 다른 실행의 같은 `DEVICE-N`과 비교 불가
+- 단일 단말 L2 근거가 있는 프레임과 거래만 연결
+- RADIUS처럼 단말 L2 근거가 없는 거래는 시간만으로 연결하지 않음
+- 모호하거나 불완전한 근거는 미할당 유지
+
+일반 DNS·TCP·TLS·ARP 주소만으로 새 `DEVICE-N`을 만들지 않습니다. 802.11 관리 프레임, 직접 EAPOL/EAP 방향과 DHCP 클라이언트 방향처럼 단말 역할이 명확한 근거에서만 최초 등록합니다.
+
+### 8. 단말 가명별 접속 관찰 여정
+
+Phase 4F는 `DEVICE-N`에 이미 안전하게 연결된 거래만 모아 실제 근거 프레임 순서로 관찰 여정을 만듭니다.
 
 ```text
 DEVICE-1
-프레임: #5~#88
-확인 근거: 802.11 Association 요청 · DHCP 클라이언트 송신
-관찰 프로토콜: wlan · eapol · eap · dhcp · dns · tcp
-관찰 AP 가명: AP-1
-연결된 거래 시도: EAP-1-A1 · DHCP-1-A1 · DNS-1-A1 · TCP-1-A1
-Wireshark 필터: frame.number == 5 || frame.number == 8 || ...
+관찰 단계: EAP → DHCP → DNS → TCP
+첫 실패 관찰 단계: TCP
+마지막 성공 방향 단계: TCP
 ```
 
-`DEVICE-1`과 `AP-1`은 **현재 분석 실행에서만** 의미가 있습니다. 프로그램을 종료하고 같은 캡처를 다시 분석해도 동일 대상을 같은 번호로 보장하지 않습니다.
+각 여정은 다음 정보를 제공합니다.
 
-## 단말 가명 생성 기준
+- 연결된 거래 시도 ID
+- 실제 프레임 순서 기준 관찰 단계
+- 단계별 완료·성공 방향·실패·혼재·미완료 상태
+- 첫 실패 관찰 단계
+- 마지막 성공 방향 단계
+- AP 가명
+- 근거 프레임과 Wireshark 필터
+- 단말에 연결하지 못한 거래와 모호한 거래 수
 
-서버·게이트웨이·AP를 단말로 잘못 분류하지 않기 위해 일반 DNS·TCP 주소만으로 새 `DEVICE-N`을 만들지 않습니다. 다음처럼 단말 방향이 명확한 패킷에서만 최초 등록합니다.
+| 여정 상태 | 의미 |
+|---|---|
+| `progress-observed` | 연결된 단계에서 성공 방향 진행이 관찰됨 |
+| `failure-observed` | 한 개 이상 단계에서 명시적 실패가 관찰됨 |
+| `mixed` | 같은 단계 또는 여정에 성공과 실패가 함께 있음 |
+| `partial-progress` | 성공 방향 단계와 최종 결과 미확인 단계가 함께 있음 |
+| `incomplete` | 연결 거래는 있지만 명시적 최종 결과가 없음 |
+| `no-linked-transactions` | 단말 가명은 있지만 안전하게 연결된 거래가 없음 |
 
-- 802.11 Authentication·Association·Reassociation 요청 송신자
-- 해당 관리 응답 수신자
-- BSSID를 제외한 802.11 EAP/EAPOL Supplicant 주소
-- Ethernet EAP Request 수신자와 EAP Response 송신자
-- EAP Success·Failure 수신자
-- EAPOL Start·Logoff 송신자
-- DHCP Discover·Request·Decline·Release·Inform 송신자
+단말 여정은 동일 사용자 신원이나 하나의 완전한 교차 프로토콜 세션을 확정하지 않습니다. `첫 실패 관찰 단계`는 실패 패킷이 처음 보인 위치이며 근본 원인의 위치가 아닙니다.
 
-한 번 단말로 확인된 주소가 후속 DNS·TCP·TLS·ARP 프레임에 단 하나만 나타날 때만 해당 프레임과 거래 시도를 같은 `DEVICE-N`에 연결합니다.
-
-## 모호함 처리
+## 중요한 해석 원칙
 
 ```text
-한 프레임에 알려진 단말이 0개
-→ 미할당
-
-한 프레임에 알려진 단말이 1개
-→ 해당 DEVICE-N에 연결 가능
-
-한 프레임에 알려진 단말이 2개 이상
-→ 모호함, 자동 연결하지 않음
+EAP Success 관찰 ≠ 전체 접속 성공 확정
+RADIUS Access-Accept 관찰 ≠ 사용자 서비스 정상 확정
+RADIUS Access-Reject 관찰 ≠ ClearPass 자체 장애 확정
+DHCP ACK 관찰 ≠ 이후 통신 정상 확정
+TCP SYN/ACK 관찰 ≠ 3-Way Handshake 완료 확정
+TCP RST 관찰 ≠ 서버·방화벽·애플리케이션 중 원인 확정
+TCP Retransmission 관찰 ≠ RF 장애 확정
+프로토콜 미관찰 ≠ 해당 단계 장애
+첫 실패 관찰 단계 ≠ 근본 원인 발생 위치
 ```
 
-RADIUS처럼 단말 L2 주소가 보이지 않는 서버 간 트래픽은 시간만 가깝다는 이유로 단말에 연결하지 않습니다.
-
-## 가명화 개인정보 경계
-
-가명화는 기존 공개 이벤트 출력과 분리된 `device-identities` 프로파일에서만 수행합니다.
-
-허용하는 원문 L2 필드:
+다음 값은 항상 `false`입니다.
 
 ```text
-eth.src
-eth.dst
-wlan.sa
-wlan.da
-wlan.bssid
+raw_identifiers_serialized
+alias_secret_persisted
+aliases_stable_across_runs
+device_identity_confirmed
+cross_protocol_session_confirmed
+root_cause_confirmed
 ```
 
-원문 주소는 분석 중 메모리에서만 읽고, 실행마다 새로 생성한 32바이트 비밀키로 HMAC-SHA-256 처리합니다. 결과 객체에는 HMAC 결과도 넣지 않고 순번 가명만 남깁니다.
-
-```text
-raw_identifiers_serialized = false
-alias_secret_persisted = false
-aliases_stable_across_runs = false
-```
+## 개인정보·사내 데이터 보호
 
 다음 값은 GUI와 기본 JSON에 포함하지 않습니다.
 
 ```text
 IPv4·IPv6 주소
 원본 Ethernet·802.11 MAC 주소
-원본 BSSID·SSID
+SSID·BSSID
 사용자명·EAP Identity·RADIUS User-Name
 DNS 질의명·호스트명
 TCP·UDP 포트
 원본 EAP·RADIUS·DHCP·DNS 거래 ID
 원본 TCP·UDP Stream 번호
-절대 epoch 시간
-HMAC digest와 가명화 키
+HMAC 키·HMAC 내부 토큰
+절대 epoch
 Raw Payload·파일 내용
 쿠키·Authorization·자격 증명
 원본 파일명·절대경로
 TShark 표준 오류 원문
 ```
 
-TShark stdout과 Python 파싱 메모리에는 원문 L2 주소가 분석 중 일시적으로 존재할 수 있습니다. 따라서 메모리 덤프 공격까지 포함한 원문 주소 완전 비노출을 주장하지 않습니다. 디스크·로그·JSON·HTML·외부 전송에 원문을 남기지 않는 것이 현재 보장 범위입니다.
-
-## 반드시 지켜야 할 해석 원칙
-
-```text
-DEVICE-1 = 실제 사용자 신원 아님
-DEVICE-1 = 자산 번호 아님
-AP-1 = 실제 AP 이름·위치 아님
-같은 DEVICE-1에 여러 거래 연결 = 하나의 전체 접속 확정 아님
-다른 분석의 DEVICE-1 = 같은 단말이라는 뜻 아님
-RADIUS 미할당 = RADIUS 장애라는 뜻 아님
-TCP 재전송 = RF 장애 확정 아님
-패킷 미관찰 = 해당 단계 장애 확정 아님
-```
-
-각 단말 결과에는 다음 값이 고정됩니다.
-
-```text
-device_identity_confirmed = false
-cross_protocol_session_confirmed = false
-```
+원본 L2 주소는 전용 TShark stdout과 Python 파싱 메모리에 분석 중 일시적으로 존재할 수 있습니다. 메모리 포렌식까지 포함한 완전 비노출을 주장하지 않으며, 디스크·로그·JSON·GUI·릴리스 자산·외부 네트워크에 남기지 않는 것이 현재 보장 범위입니다.
 
 ## 실행 안전장치
 
 - 프로젝트에 포함된 고정 TShark만 사용
 - 시스템 Wireshark·TShark 자동 사용 금지
 - TShark 전체 파일 크기·SHA-256 실행 전후 검증
-- 캡처 형식·크기·SHA-256 실행 전후 검증
+- 캡처 형식·크기·SHA-256을 각 분석 단계 전후 검증
 - `-n` 이름 해석 비활성화
 - 저장 캡처 `-r`, 패킷 상한 `-c`, 고정 fields만 허용
 - 실시간·원격 캡처와 사용자 임의 옵션 차단
 - 빈 설정·플러그인·extcap·임시 디렉터리 사용
 - stdout·stderr 동시 처리와 크기·시간 상한
-- 상세 이벤트·거래·가명 수 상한
-- TShark stderr 원문 폐기
 - 분석 취소 지원
-- 종료 후 임시 작업공간 자동 삭제
+- 임시 작업공간 자동 삭제
+- Symlink·Junction·Reparse Point 우회 차단
+
+TShark가 임시파일을 생성·삭제하면서 바꿀 수 있는 Windows Archive·시간·디렉터리 크기는 객체 교체로 오인하지 않지만, 장치 ID·파일 ID·객체 종류·링크 수·Reparse Point와 실행 후 잔류 파일은 계속 검사합니다.
+
+## 자원 제한
+
+- 고정 분석 프로파일 최대 100,000프레임
+- 상세 이벤트 최대 2,000건
+- 거래 시도 최대 50,000개
+- 단말·AP 가명 각각 최대 20,000개
+- 거래 근거 프레임 최대 64개
+- 여정 근거 프레임 최대 96개
+- TShark stdout 기본 64MiB
+- TShark stderr 기본 1MiB
+- 기본 실행 제한시간 180초
+
+근거 프레임이 상한 때문에 일부 생략되면 해당 거래를 단말 여정에 연결하지 않습니다.
 
 ## SHA-256 확인
 
 ```powershell
-Get-FileHash .\WlanTroubleshooterKO-v0.8.0-alpha.1-win64-portable.zip -Algorithm SHA256
+Get-FileHash .\WlanTroubleshooterKO-v0.9.0-alpha.1-win64-portable.zip -Algorithm SHA256
 ```
 
-릴리즈의 같은 이름 `.sha256` 파일과 출력값을 비교합니다. EXE에는 아직 상용 코드 서명 인증서가 없어 Windows가 `알 수 없는 게시자` 경고를 표시할 수 있습니다.
+릴리스의 같은 이름 `.sha256` 파일과 출력값을 비교합니다. EXE에는 아직 상용 코드 서명 인증서가 없어 Windows가 `알 수 없는 게시자` 경고를 표시할 수 있습니다.
 
 ## 아직 지원하지 않는 기능
 
-- `DEVICE-N` 내부에서 여러 접속 시도를 시간 구간별로 분리
-- 서로 다른 프로토콜 거래를 하나의 완전한 단말 접속으로 확정
-- RADIUS 서버 거래를 단말 세션에 안전하게 연결
+- `DEVICE-N`을 실제 사용자·자산 신원으로 확정
+- 여러 프로토콜 거래가 하나의 완전한 사용자 세션임을 확정
+- 캡처 누락과 실제 미응답의 자동 확정 구분
 - 동일 단말의 EAPOL 4-Way Handshake 메시지 1~4 완결성 판정
-- 응답 미관찰과 캡처 누락·단방향 수집의 자동 구분
-- BSSID·채널·RSSI 기반 로밍·RF 장애 상관분석
-- Aruba Controller·ClearPass Role·VLAN 맞춤 확인 절차
-- 최종 오프라인 한국어 HTML 보고서
-- 실제 사내 캡처 검증과 상용 코드 서명
+- BSSID·채널·RSSI 기반 로밍·RF 근본 원인 분석
+- Aruba Controller·ClearPass Role·VLAN 맞춤 점검 안내
+- 최종 단일 오프라인 한국어 HTML 보고서
+- 실제 사내 Aruba·ClearPass 캡처 검증
+- 네트워크 어댑터 비활성·Outbound 차단·EDR 환경 검증
+- 상용 코드 서명 인증서 적용
 
-세부 경계는 `docs/PHASE_4E_PLAN.md`와 `docs/adr/0004-analysis-scoped-device-pseudonyms.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`를 확인합니다.
+세부 경계는 `docs/PHASE_4F_PLAN.md`, 가명화 경계는 `docs/adr/0004-analysis-scoped-device-pseudonyms.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`를 확인합니다.

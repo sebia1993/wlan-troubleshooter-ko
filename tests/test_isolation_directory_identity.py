@@ -44,7 +44,6 @@ class IsolationDirectoryIdentityTests(unittest.TestCase):
             changed_ns=1000,
             attributes=0x10 | 0x20,
         )
-
         self.assertTrue(_same_directory_identity(current, self.expected()))
 
     def test_device_inode_type_and_link_count_still_define_identity(self):
@@ -60,7 +59,6 @@ class IsolationDirectoryIdentityTests(unittest.TestCase):
 
     def test_reparse_point_transition_is_never_accepted(self):
         current = FakeDirectoryStat(attributes=0x10 | _REPARSE_POINT_FLAG)
-
         self.assertFalse(_same_directory_identity(current, self.expected()))
 
 

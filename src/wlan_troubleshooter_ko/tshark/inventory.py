@@ -7,6 +7,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Tuple
 
+from wlan_troubleshooter_ko.analysis.device_journeys import (
+    DeviceJourneyReport,
+    build_device_journeys,
+)
 from wlan_troubleshooter_ko.analysis.device_sessions import (
     DeviceSessionReport,
     build_device_sessions,
@@ -177,6 +181,7 @@ class ProtocolInventoryRun:
     event_timeline: Optional[EventTimeline] = None
     transaction_sessions: Optional[TransactionSessionReport] = None
     device_sessions: Optional[DeviceSessionReport] = None
+    device_journeys: Optional[DeviceJourneyReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -202,6 +207,9 @@ class ProtocolInventoryRun:
             ),
             "device_sessions": (
                 None if self.device_sessions is None else self.device_sessions.to_dict()
+            ),
+            "device_journeys": (
+                None if self.device_journeys is None else self.device_journeys.to_dict()
             ),
         }
 
@@ -415,7 +423,7 @@ def run_connection_analysis(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> ProtocolInventoryRun:
-    """한 번의 일반 출력과 전용 가명화 출력에서 공개 분석 결과를 만든다."""
+    """공개 분석·가명화 출력에서 Finding, 단말 가명과 여정을 만든다."""
 
     if not workspace_root.is_dir():
         raise TSharkExecutionError("접속 단계 분석 작업공간이 준비되지 않았습니다.")
@@ -505,6 +513,11 @@ def run_connection_analysis(
             ),
         )
 
+    device_journeys = build_device_journeys(
+        device_sessions,
+        transaction_sessions,
+    )
+
     # Raw L2 identifiers exist only in the transient identity output. The
     # returned dataclasses contain aliases and packet evidence only.
     del identity_result
@@ -520,4 +533,5 @@ def run_connection_analysis(
         event_timeline=timeline,
         transaction_sessions=transaction_sessions,
         device_sessions=device_sessions,
+        device_journeys=device_journeys,
     )

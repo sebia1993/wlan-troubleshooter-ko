@@ -73,6 +73,14 @@ _EVIDENCE_LABELS = {
     "known-l2-address": "기확인 L2 주소",
 }
 
+_JOURNEY_STAGE_LABELS = {
+    "eap": "EAP 인증",
+    "radius": "RADIUS 인증",
+    "dhcp": "DHCP 주소 할당",
+    "dns": "DNS 이름 조회",
+    "tcp": "TCP 연결",
+}
+
 
 def _compact(items: Sequence[str], limit: int = 5) -> str:
     values = tuple(items)
@@ -121,7 +129,7 @@ def _portable_status(bundle_status: BundleStatus) -> str:
         len(registry.protocol_groups),
     )
     if bundle_status.code == "integrity_verified":
-        return base + " · 내장 TShark 무결성 확인됨 · DEVICE-N/AP-N 사용 가능"
+        return base + " · 내장 TShark 무결성 확인됨 · DEVICE-N 관찰 여정 사용 가능"
     return base + " · 소스 실행 모드 · Portable 배포본은 내장 TShark를 사용합니다."
 
 
@@ -490,6 +498,134 @@ def _format_devices(result: CaptureAnalysisResult, limit: int = 60) -> str:
     )
 
 
+def _format_journeys(result: CaptureAnalysisResult, limit: int = 40) -> str:
+    run = result.protocol_inventory
+    if run is None or run.device_journeys is None:
+        return "\n\n[8. 단말 가명별 관찰 여정]\n단말 여정 결과가 없습니다."
+    report = run.device_journeys
+    journey_states = {
+        "progress-observed": "성공 방향 진행 관찰",
+        "failure-observed": "실패 결과 관찰",
+        "mixed": "성공·실패 혼재",
+        "partial-progress": "일부 진행·미완료 혼재",
+        "incomplete": "최종 결과 미확인",
+        "no-linked-transactions": "연결 거래 없음",
+    }
+    stage_states = {
+        "complete": "필요 순서 완료 관찰",
+        "success-observed": "성공 방향 결과 관찰",
+        "failure-observed": "실패 결과 관찰",
+        "mixed": "성공·실패 혼재",
+        "partial-progress": "성공 방향·미완료 혼재",
+        "incomplete": "최종 결과 미확인",
+    }
+    journeys = []
+    for index, item in enumerate(report.journeys[:limit], start=1):
+        stage_lines = []
+        for stage in item.stages:
+            stage_lines.append(
+                "   - [{state}] {label}: {summary}\n"
+                "     거래: {attempts} · 근거: {frames}".format(
+                    state=stage_states.get(stage.state, stage.state),
+                    label=stage.label_ko,
+                    summary=stage.summary_ko,
+                    attempts=_compact(stage.attempt_ids, 12),
+                    frames=_frames(stage.evidence_frames),
+                )
+            )
+        if not stage_lines:
+            stage_lines.append("   - 안전하게 연결된 프로토콜 거래가 없습니다.")
+        first_failure = (
+            "없음"
+            if item.first_failure_stage is None
+            else _JOURNEY_STAGE_LABELS.get(
+                item.first_failure_stage,
+                item.first_failure_stage,
+            )
+        )
+        last_positive = (
+            "없음"
+            if item.last_positive_stage is None
+            else _JOURNEY_STAGE_LABELS.get(
+                item.last_positive_stage,
+                item.last_positive_stage,
+            )
+        )
+        observed_order = " → ".join(
+            _JOURNEY_STAGE_LABELS.get(value, value)
+            for value in item.observed_stage_order
+        ) or "없음"
+        journeys.append(
+            "{index}. [{state}] {alias}\n"
+            "   설명: {summary}\n"
+            "   관찰 단계 순서: {order}\n"
+            "   첫 실패 관찰 단계: {failure}\n"
+            "   마지막 성공 방향 단계: {positive}\n"
+            "   관찰 AP 가명: {aps}\n"
+            "   프레임: #{first:,}~#{last:,} · 상대 지속시간 {duration:,}ms\n"
+            "   연결 거래: {attempts}\n"
+            "   단계별 결과:\n{stages}\n"
+            "   Wireshark 근거 필터: {display_filter}".format(
+                index=index,
+                state=journey_states.get(item.state, item.state),
+                alias=item.device_alias,
+                summary=item.summary_ko,
+                order=observed_order,
+                failure=first_failure,
+                positive=last_positive,
+                aps=_compact(item.ap_aliases, 10),
+                first=item.first_frame,
+                last=item.last_frame,
+                duration=item.duration_ms,
+                attempts=_compact(item.linked_attempt_ids, 20),
+                stages="\n".join(stage_lines),
+                display_filter=item.display_filter or "없음",
+            )
+        )
+    if not journeys:
+        journeys.append("분석 실행에서 단말 가명별 여정을 만들지 못했습니다.")
+    hidden = max(0, len(report.journeys) - limit)
+    if hidden:
+        journeys.append(
+            "단말 여정 {0:,}개는 GUI 상세 표시에서 생략했습니다.".format(hidden)
+        )
+    state_summary = " · ".join(
+        "{0} {1:,}개".format(journey_states.get(state, state), count)
+        for state, count in report.journeys_by_state
+    ) or "없음"
+    return (
+        "\n\n[8. 단말 가명별 관찰 여정]\n"
+        "원본 분석 범위: {source} · 전체 거래 연결: {linkage} · "
+        "여정 {total:,}개 · 연결 거래 {linked:,}건\n"
+        "미할당 거래 {unassigned:,}건 · 모호 거래 {ambiguous:,}건 · "
+        "연결 거래 없는 단말 {without:,}개\n"
+        "여정 상태: {states}\n\n"
+        "단말 여정:\n{journeys}\n"
+        "주의: {cautions}\n"
+        "확정 경계: 원문 식별자 직렬화 {raw} · 실행 간 가명 고정 {stable} · "
+        "단말 신원 확정 {identity} · 교차 프로토콜 세션 확정 {cross} · "
+        "근본 원인 확정 {root}\n"
+        "중요: 이 결과는 DEVICE-N에 이미 안전하게 연결된 거래의 관찰 순서이며, "
+        "동일 사용자 세션이나 전체 접속 성공을 자동 확정하지 않습니다."
+    ).format(
+        source="전체" if report.source_complete else "일부",
+        linkage="완료" if report.linkage_complete else "일부",
+        total=len(report.journeys),
+        linked=report.linked_attempts_total,
+        unassigned=report.unassigned_attempts,
+        ambiguous=report.ambiguous_attempts,
+        without=report.devices_without_linked_attempts,
+        states=state_summary,
+        journeys="\n\n".join(journeys),
+        cautions=_compact(report.cautions, 10),
+        raw="예" if report.raw_identifiers_serialized else "아니오",
+        stable="예" if report.aliases_stable_across_runs else "아니오",
+        identity="예" if report.device_identity_confirmed else "아니오",
+        cross="예" if report.cross_protocol_session_confirmed else "아니오",
+        root="예" if report.root_cause_confirmed else "아니오",
+    )
+
+
 def format_analysis_detail(result: CaptureAnalysisResult) -> str:
     detail = _format_preflight(
         result.capture_format,
@@ -506,10 +642,11 @@ def format_analysis_detail(result: CaptureAnalysisResult) -> str:
             + _format_timeline(result)
             + _format_transactions(result)
             + _format_devices(result)
+            + _format_journeys(result)
         )
     return (
         detail
-        + "\n\n[2. 프로토콜·접속 단계·이벤트·거래·단말 가명 분석]\n"
+        + "\n\n[2. 프로토콜·접속 단계·이벤트·거래·단말 가명·여정 분석]\n"
         + ("실행 안 함" if result.inventory_state == "unavailable" else "실패")
         + ": "
         + result.inventory_message
@@ -586,7 +723,7 @@ class CaptureViewModel:
         self.capabilities = result.capabilities
         self.analysis_result = result
         if result.inventory_state == "completed":
-            status = "캡처·Finding·거래 시도·단말 가명 분석을 완료했습니다."
+            status = "캡처·Finding·거래·단말 가명·관찰 여정 분석을 완료했습니다."
         elif result.inventory_state == "failed":
             status = "캡처 사전 점검은 완료했지만 상세 분석에 실패했습니다."
         else:
@@ -629,7 +766,7 @@ class MainWindow:
 
     def _build(self) -> None:
         self._root.title("WLAN 장애 분석기 KO")
-        self._root.minsize(940, 760)
+        self._root.minsize(960, 780)
 
         frame = ttk.Frame(self._root, padding=24)
         frame.pack(fill="both", expand=True)
@@ -648,7 +785,7 @@ class MainWindow:
             frame,
             text=(
                 "접속 단계 · 근거 Finding · 거래 시도 · "
-                "분석 실행별 DEVICE-N/AP-N"
+                "DEVICE-N/AP-N · 단말 가명별 관찰 여정"
             ),
         ).pack(anchor="w")
 
@@ -686,7 +823,7 @@ class MainWindow:
         self._detail_text = tk.Text(
             result_frame,
             wrap="word",
-            height=26,
+            height=27,
             padx=12,
             pady=10,
             state="disabled",
@@ -713,15 +850,15 @@ class MainWindow:
         ttk.Label(
             frame,
             textvariable=self._portable_status,
-            wraplength=880,
+            wraplength=900,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Label(
             frame,
             text=(
                 "원문 L2 주소와 가명화 키는 결과·로그·파일에 저장하지 않습니다. "
-                "DEVICE-N/AP-N은 실행할 때마다 새로 만들어집니다."
+                "여정은 관찰 결과이며 동일 사용자 세션·근본 원인을 확정하지 않습니다."
             ),
-            wraplength=880,
+            wraplength=900,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Button(
             frame,
@@ -765,7 +902,7 @@ class MainWindow:
         cancel_event = threading.Event()
         self._validation_cancel = cancel_event
         self._status.set(
-            "캡처 구조·접속 단계·거래 시도·단말 가명을 분석하고 있습니다."
+            "캡처 구조·접속 단계·거래·단말 가명·관찰 여정을 분석하고 있습니다."
         )
         self._set_detail(
             "파일명과 패킷 원문은 화면과 로그에 표시하지 않습니다. "
