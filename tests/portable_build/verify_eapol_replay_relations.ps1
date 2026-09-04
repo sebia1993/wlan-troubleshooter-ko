@@ -47,7 +47,9 @@ try {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
         Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
         $env:PATH = (Join-Path $env:SystemRoot "System32") + ";" + $env:SystemRoot
-        $Process = Start-Process -FilePath (Join-Path $Expanded "WlanTroubleshooterKO.exe") -ArgumentList @(("--analyze-capture=`"" + $Capture + "`""),("--analysis-output=`"" + $Output + "`"")) -WorkingDirectory $Expanded -Wait -PassThru
+        $Application = Join-Path $Expanded "WlanTroubleshooterKO.exe"
+        $Arguments = @(("--analyze-capture=`"" + $Capture + "`""),("--analysis-output=`"" + $Output + "`""))
+        $Process = Start-Process -FilePath $Application -ArgumentList $Arguments -WorkingDirectory $Expanded -Wait -PassThru
         if ($Process.ExitCode -ne 0) { throw "Portable Replay Counter relation analysis failed with exit code $($Process.ExitCode)." }
     }
     finally {
@@ -55,12 +57,13 @@ try {
         Restore-EnvironmentValue -Name "PYTHONPATH" -Value $OldPythonPath
         Restore-EnvironmentValue -Name "PYTHONHOME" -Value $OldPythonHome
     }
+    if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) { throw "Portable Replay Counter relation result is missing." }
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 192
     $Report = $Result.eapol_replay_relations
-    if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed" -or $null -eq $Report -or $Report.schema_version -ne 1 -or $Report.profile_version -ne "0.6.0" -or $Report.field_available -ne $true -or $Report.rows_observed -ne 9 -or $Report.key_rows_observed -ne 5 -or $Report.observations_total -ne 1 -or $Report.complete -ne $true -or $Report.raw_replay_counters_serialized -ne $false -or $Report.replay_counter_values_persisted -ne $false -or $Report.same_handshake_confirmed -ne $false -or $Report.retransmission_confirmed -ne $false -or $Report.key_installation_confirmed -ne $false -or $Report.cryptographic_success_confirmed -ne $false -or $Report.root_cause_confirmed -ne $false) { throw "Portable Replay Counter relation report is missing or violated its conservative boundary." }
+    if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed" -or $null -eq $Report -or $Report.schema_version -ne 1 -or $Report.profile_version -ne "0.6.0" -or $Report.field_available -ne $true -or $Report.rows_observed -ne 9 -or $Report.key_rows_observed -ne 5 -or $Report.observations_source_total -ne 1 -or $Report.observations_evaluated -ne 1 -or @($Report.observations).Count -ne 1 -or $Report.complete -ne $true -or $Report.raw_replay_counters_serialized -ne $false -or $Report.replay_counter_values_persisted -ne $false -or $Report.same_handshake_confirmed -ne $false -or $Report.retransmission_confirmed -ne $false -or $Report.key_installation_confirmed -ne $false -or $Report.cryptographic_success_confirmed -ne $false -or $Report.root_cause_confirmed -ne $false) { throw "Portable Replay Counter relation report is missing or violated its conservative boundary." }
     $Observation = @($Report.observations)[0]
-    if ($Observation.observation_id -ne "EAPOL-HS-1" -or $Observation.device_alias -ne "DEVICE-1" -or $Observation.ap_alias -ne "AP-1" -or $Observation.state -ne "expected-relations-observed" -or $Observation.m1_m2_relation -ne "equal-observed" -or $Observation.m3_m4_relation -ne "equal-observed" -or $Observation.m1_m3_progression -ne "increased-observed" -or $Observation.retransmission_confirmed -ne $false -or [string]::IsNullOrWhiteSpace([string]$Observation.display_filter)) { throw "Portable EAPOL-HS-1 Replay Counter relationship is unexpected." }
+    if ($Observation.observation_id -ne "EAPOL-HS-1" -or $Observation.device_alias -ne "DEVICE-1" -or $Observation.ap_alias -ne "AP-1" -or $Observation.state -ne "expected-relations-observed" -or $Observation.m1_m2_relation -ne "equal-observed" -or $Observation.m3_m4_relation -ne "equal-observed" -or $Observation.m1_m3_progression -ne "increased-observed" -or $Observation.raw_replay_counters_serialized -ne $false -or $Observation.replay_counter_values_persisted -ne $false -or $Observation.same_handshake_confirmed -ne $false -or $Observation.retransmission_confirmed -ne $false -or $Observation.key_installation_confirmed -ne $false -or $Observation.cryptographic_success_confirmed -ne $false -or $Observation.root_cause_confirmed -ne $false -or [string]::IsNullOrWhiteSpace([string]$Observation.display_filter)) { throw "Portable EAPOL-HS-1 Replay Counter relationship is unexpected." }
     Assert-ExactIntegerSequence -Actual $Observation.evidence_frames -Expected @(5,6,7,8,9) -Label "Replay relation evidence"
     Assert-ExactIntegerSequence -Actual $Observation.frames_with_counter -Expected @(5,6,7,8,9) -Label "Replay counter frames"
     Assert-ExactIntegerSequence -Actual $Observation.missing_counter_frames -Expected @() -Label "Missing Replay counter frames"
