@@ -40,6 +40,7 @@ def self_check() -> Dict[str, str]:
     field_registry = load_field_profiles(resources / "tshark" / "field-profiles.v1.json")
     inventory_profile = field_registry.get_profile("protocol-inventory")
     event_profile = field_registry.get_profile("connection-events")
+    identity_profile = field_registry.get_profile("device-identities")
     tkinter.Tcl()
 
     vendor_root = distribution_root() / "vendor" / "wireshark"
@@ -51,9 +52,11 @@ def self_check() -> Dict[str, str]:
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
-        analysis_execution = "활성 · 접속 단계 Finding·이벤트 타임라인·거래 시도 요약"
+        analysis_execution = (
+            "활성 · Finding·거래 시도·분석 실행별 DEVICE-N/AP-N 가명"
+        )
     return {
-        "phase": "4D",
+        "phase": "4E",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "rule_count": str(len(rules["rules"])),
@@ -62,7 +65,9 @@ def self_check() -> Dict[str, str]:
         "field_profile_version": field_registry.profile_version,
         "inventory_field_count": str(len(inventory_profile.fields)),
         "event_field_count": str(len(event_profile.fields)),
+        "identity_field_count": str(len(identity_profile.fields)),
         "transaction_session_schema_version": "1",
+        "device_session_schema_version": "1",
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
         "python_external_required": "true" if _external_python_required() else "false",
@@ -71,7 +76,10 @@ def self_check() -> Dict[str, str]:
         "protocol_inventory_execution": analysis_execution,
         "analysis_features": (
             "캡처 구조 점검 + 프로토콜 인벤토리 + 접속 단계 Finding + "
-            "비식별 이벤트 타임라인 + 거래 시도 완결성 요약"
+            "비식별 이벤트 타임라인 + 거래 시도 + 분석 실행별 단말·AP 가명"
+        ),
+        "identity_privacy": (
+            "원문 L2 주소 미직렬화 · HMAC 키 미저장 · 실행 간 별칭 비고정"
         ),
         "network_features": "없음",
     }
