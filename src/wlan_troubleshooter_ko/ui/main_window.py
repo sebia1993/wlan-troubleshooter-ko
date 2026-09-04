@@ -1,4 +1,4 @@
-"""캡처 구조, Finding, 타임라인과 비식별 거래 시도를 보여 주는 GUI."""
+"""완전 오프라인 WLAN 캡처 분석 GUI."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
@@ -57,21 +57,36 @@ _EVENT_LABELS = {
     "tls_finished": "TLS Finished",
 }
 
+_EVIDENCE_LABELS = {
+    "wlan-management-request": "802.11 관리 요청",
+    "wlan-management-response": "802.11 관리 응답",
+    "wlan-authentication-request": "802.11 인증 요청",
+    "wlan-authentication-response": "802.11 인증 응답",
+    "wlan-authentication-frame": "802.11 인증 프레임",
+    "wlan-disconnect-frame": "802.11 연결 해제",
+    "wlan-eap-supplicant": "무선 EAP Supplicant",
+    "ethernet-eap-request": "유선 EAP 요청 대상",
+    "ethernet-eap-response": "유선 EAP 응답 송신",
+    "ethernet-eap-result": "유선 EAP 결과 대상",
+    "ethernet-eapol-supplicant": "EAPOL Supplicant",
+    "dhcp-client": "DHCP 클라이언트 송신",
+    "known-l2-address": "기확인 L2 주소",
+}
 
-def _compact(items: Tuple[str, ...], limit: int = 5) -> str:
-    if not items:
+
+def _compact(items: Sequence[str], limit: int = 5) -> str:
+    values = tuple(items)
+    if not values:
         return "없음"
-    visible = list(items[:limit])
-    if len(items) > limit:
-        visible.append("외 {0}개".format(len(items) - limit))
+    visible = list(values[:limit])
+    if len(values) > limit:
+        visible.append("외 {0}개".format(len(values) - limit))
     return " · ".join(visible)
 
 
 def _frames(values: Iterable[int]) -> str:
     items = tuple(values)
-    if not items:
-        return "없음"
-    return ", ".join("#{0:,}".format(value) for value in items)
+    return "없음" if not items else ", ".join("#{0:,}".format(value) for value in items)
 
 
 def _event_labels(values: Iterable[str]) -> str:
@@ -81,21 +96,33 @@ def _event_labels(values: Iterable[str]) -> str:
     return " → ".join(_EVENT_LABELS.get(value, value) for value in items)
 
 
+def _display_filter(frames: Iterable[int]) -> str:
+    values = tuple(frames)
+    return " || ".join("frame.number == {0}".format(value) for value in values)
+
+
 def _portable_status(bundle_status: BundleStatus) -> str:
     resources = Path(__file__).resolve().parents[1] / "resources"
     try:
-        registry = load_field_profiles(resources / "tshark" / "field-profiles.v1.json")
-        profile = registry.get_profile("connection-events")
+        registry = load_field_profiles(
+            resources / "tshark" / "field-profiles.v1.json"
+        )
+        events = registry.get_profile("connection-events")
+        identities = registry.get_profile("device-identities")
     except FieldProfileError:
-        return "접속 단계 프로파일 오류 · 배포본을 다시 받아야 합니다."
-    base = "필드 프로파일 {0} · 접속 필드 {1}개 · 프로토콜 그룹 {2}개".format(
+        return "분석 프로파일 오류 · 배포본을 다시 받아야 합니다."
+    base = (
+        "필드 프로파일 {0} · 이벤트 필드 {1}개 · 가명화 필드 {2}개 · "
+        "프로토콜 그룹 {3}개"
+    ).format(
         registry.profile_version,
-        len(profile.fields),
+        len(events.fields),
+        len(identities.fields),
         len(registry.protocol_groups),
     )
     if bundle_status.code == "integrity_verified":
-        return base + " · 내장 TShark 무결성 확인됨 · 거래 시도 요약 사용 가능"
-    return base + " · 소스 실행 모드 · Portable 배포본에서는 내장 TShark가 사용됩니다."
+        return base + " · 내장 TShark 무결성 확인됨 · DEVICE-N/AP-N 사용 가능"
+    return base + " · 소스 실행 모드 · Portable 배포본은 내장 TShark를 사용합니다."
 
 
 def _format_preflight(
@@ -137,8 +164,6 @@ def format_preflight_detail(
     structure: CaptureStructure,
     report: CaptureCapabilityReport,
 ) -> str:
-    """기존 호출자와 테스트를 위한 사전 점검 문장 호환 함수."""
-
     return _format_preflight(
         capture.capture_format,
         capture.size_bytes,
@@ -148,21 +173,20 @@ def format_preflight_detail(
     )
 
 
-def _format_observations(result: CaptureAnalysisResult) -> str:
+def _format_inventory(result: CaptureAnalysisResult) -> str:
     run = result.protocol_inventory
     if run is None:
         return ""
     inventory = run.inventory
-    observed = []
-    for item in inventory.observations:
-        observed.append(
-            "- {label}: {count:,}프레임 · 처음 #{first:,} · 마지막 #{last:,}".format(
-                label=item.label_ko,
-                count=item.frame_count,
-                first=item.first_frame,
-                last=item.last_frame,
-            )
+    observed = [
+        "- {0}: {1:,}프레임 · 처음 #{2:,} · 마지막 #{3:,}".format(
+            item.label_ko,
+            item.frame_count,
+            item.first_frame,
+            item.last_frame,
         )
+        for item in inventory.observations
+    ]
     if not observed:
         observed.append("- 승인된 프로토콜 그룹이 관찰되지 않았습니다.")
     expected = (
@@ -178,7 +202,7 @@ def _format_observations(result: CaptureAnalysisResult) -> str:
         "관찰됨:\n{observed}\n"
         "관찰되지 않음: {not_observed}\n"
         "주의: {cautions}\n"
-        "프로토콜이 보였다는 사실은 성공을 뜻하지 않고, 보이지 않았다는 사실도 장애 증거가 아닙니다."
+        "프로토콜 관찰 여부만으로 단계 성공·실패를 확정하지 않습니다."
     ).format(
         state="전체" if inventory.complete else "일부 또는 판단 불가",
         version=run.bundle_version,
@@ -186,8 +210,8 @@ def _format_observations(result: CaptureAnalysisResult) -> str:
         expected=expected,
         truncated=inventory.truncated_frames,
         observed="\n".join(observed),
-        not_observed=_compact(inventory.not_observed_labels, limit=8),
-        cautions=_compact(inventory.cautions, limit=6),
+        not_observed=_compact(inventory.not_observed_labels, 8),
+        cautions=_compact(inventory.cautions, 6),
     )
 
 
@@ -204,24 +228,22 @@ def _format_correlation(result: CaptureAnalysisResult) -> str:
         "not_observed": "관찰되지 않음",
         "unavailable": "판단 불가",
     }
-    stage_lines = []
-    for stage in correlation.stages:
-        stage_lines.append(
-            "- [{state}] {label}: {summary} · 근거 {frames}".format(
-                state=state_names.get(stage.state, stage.state),
-                label=stage.label_ko,
-                summary=stage.summary_ko,
-                frames=_frames(stage.evidence_frames),
-            )
+    stages = [
+        "- [{0}] {1}: {2} · 근거 {3}".format(
+            state_names.get(item.state, item.state),
+            item.label_ko,
+            item.summary_ko,
+            _frames(item.evidence_frames),
         )
-
-    finding_lines = []
+        for item in correlation.stages
+    ]
+    findings = []
     for index, finding in enumerate(correlation.findings, start=1):
         checks = " / ".join(
             "{0}) {1}".format(number, value)
             for number, value in enumerate(finding.next_checks, start=1)
         )
-        finding_lines.append(
+        findings.append(
             "{index}. [{classification}] {title}\n"
             "   단계: {stage}\n"
             "   설명: {summary}\n"
@@ -238,20 +260,19 @@ def _format_correlation(result: CaptureAnalysisResult) -> str:
                 checks=checks,
             )
         )
-    if not finding_lines:
-        finding_lines.append(
-            "명시적인 실패 응답 Finding은 관찰되지 않았습니다. "
+    if not findings:
+        findings.append(
+            "명시적인 실패 Finding은 관찰되지 않았습니다. "
             "캡처 누락 가능성이 있으므로 전체 정상으로 확정하지 않습니다."
         )
-
     return (
         "\n\n[3. 접속 단계 요약]\n{stages}\n"
         "\n[4. 근거 기반 Finding]\n{findings}\n"
         "\n분석 주의: {cautions}"
     ).format(
-        stages="\n".join(stage_lines),
-        findings="\n\n".join(finding_lines),
-        cautions=_compact(correlation.cautions, limit=8),
+        stages="\n".join(stages),
+        findings="\n\n".join(findings),
+        cautions=_compact(correlation.cautions, 8),
     )
 
 
@@ -269,64 +290,59 @@ def _format_timeline(result: CaptureAnalysisResult, limit: int = 120) -> str:
         "not-observed": "관찰되지 않음",
         "unavailable": "판단 불가",
     }
-    stage_lines = []
-    for stage in timeline.stages:
-        stage_lines.append(
-            "- [{state}] {label}: {summary} · 근거 {frames}".format(
-                state=state_names.get(stage.state, stage.state),
-                label=stage.label_ko,
-                summary=stage.summary_ko,
-                frames=_frames(stage.evidence_frames),
-            )
+    stages = [
+        "- [{0}] {1}: {2} · 근거 {3}".format(
+            state_names.get(item.state, item.state),
+            item.label_ko,
+            item.summary_ko,
+            _frames(item.evidence_frames),
         )
-
-    visible = timeline.events[:limit]
-    event_lines = []
-    for item in visible:
-        alias = "" if item.correlation_alias is None else " · 상관 별칭 " + item.correlation_alias
+        for item in timeline.stages
+    ]
+    events = []
+    for item in timeline.events[:limit]:
+        alias = (
+            ""
+            if item.correlation_alias is None
+            else " · 상관 별칭 " + item.correlation_alias
+        )
         code = "" if item.code is None else " · 코드 " + str(item.code)
-        event_lines.append(
-            "- +{time:,}ms · 프레임 #{frame:,} · {label}{alias}{code}\n"
-            "  Wireshark 필터: {display_filter}".format(
-                time=item.relative_time_ms,
-                frame=item.frame_number,
-                label=item.label_ko,
-                alias=alias,
-                code=code,
-                display_filter=item.evidence_filter,
+        events.append(
+            "- +{0:,}ms · 프레임 #{1:,} · {2}{3}{4}\n"
+            "  Wireshark 필터: {5}".format(
+                item.relative_time_ms,
+                item.frame_number,
+                item.label_ko,
+                alias,
+                code,
+                item.evidence_filter,
             )
         )
-    if not event_lines:
-        event_lines.append("- 승인된 이벤트 필드에서 표시할 이벤트를 관찰하지 못했습니다.")
-    hidden = max(0, timeline.events_total - len(visible))
+    if not events:
+        events.append("- 승인된 필드에서 표시할 이벤트를 관찰하지 못했습니다.")
+    hidden = max(0, timeline.events_total - min(len(timeline.events), limit))
     if hidden:
-        event_lines.append(
-            "- 반복 이벤트 {0:,}건은 상세 화면에서 생략했으며 유형별 집계에는 포함했습니다.".format(
-                hidden
-            )
+        events.append(
+            "- 반복 이벤트 {0:,}건은 상세 화면에서 생략했습니다.".format(hidden)
         )
-
     return (
         "\n\n[5. 비식별 이벤트 타임라인]\n"
         "처리 프레임 {frames:,}개 · 전체 이벤트 {total:,}건 · 상세 보관 {retained:,}건\n"
         "단계별 관찰 결과:\n{stages}\n\n"
         "주요 이벤트:\n{events}\n"
         "주의: {cautions}\n"
-        "상관 별칭은 캡처 내부 순번이며 원본 거래 ID·스트림 번호를 표시하지 않습니다."
+        "상관 별칭은 원본 거래 ID·스트림 번호가 아닌 캡처 내부 순번입니다."
     ).format(
         frames=timeline.frames_observed,
         total=timeline.events_total,
         retained=timeline.events_retained,
-        stages="\n".join(stage_lines),
-        events="\n".join(event_lines),
-        cautions=_compact(timeline.cautions, limit=8),
+        stages="\n".join(stages),
+        events="\n".join(events),
+        cautions=_compact(timeline.cautions, 8),
     )
 
 
-def _format_transaction_sessions(
-    result: CaptureAnalysisResult,
-    limit: int = 80,
-) -> str:
+def _format_transactions(result: CaptureAnalysisResult, limit: int = 80) -> str:
     run = result.protocol_inventory
     if run is None or run.transaction_sessions is None:
         return "\n\n[6. 비식별 거래 시도]\n거래 시도 요약 결과가 없습니다."
@@ -338,69 +354,139 @@ def _format_transaction_sessions(
         "mixed": "성공·실패 혼재",
         "incomplete": "최종 결과 미확인",
     }
-    lines = []
-    for index, attempt in enumerate(report.attempts[:limit], start=1):
+    attempts = []
+    for index, item in enumerate(report.attempts[:limit], start=1):
         checks = " / ".join(
             "{0}) {1}".format(number, value)
-            for number, value in enumerate(attempt.next_checks_ko, start=1)
+            for number, value in enumerate(item.next_checks_ko, start=1)
         )
-        lines.append(
+        attempts.append(
             "{index}. [{state}] {attempt_id} · {label}\n"
             "   설명: {summary}\n"
             "   관찰 이벤트: {observed}\n"
             "   미확인 순서 요소: {missing}\n"
-            "   프레임: #{first:,}~#{last:,} · 상대 지속시간 {duration:,}ms · 이벤트 {count:,}건\n"
+            "   프레임: #{first:,}~#{last:,} · 상대 지속시간 {duration:,}ms · "
+            "이벤트 {count:,}건\n"
             "   근거 프레임: {frames}\n"
             "   Wireshark 필터: {display_filter}\n"
             "   다음 확인: {checks}".format(
                 index=index,
-                state=state_names.get(attempt.state, attempt.state),
-                attempt_id=attempt.attempt_id,
-                label=attempt.label_ko,
-                summary=attempt.summary_ko,
-                observed=_event_labels(attempt.observed_event_types),
-                missing=_event_labels(attempt.missing_event_types),
-                first=attempt.first_frame,
-                last=attempt.last_frame,
-                duration=attempt.duration_ms,
-                count=attempt.event_count,
-                frames=_frames(attempt.evidence_frames),
-                display_filter=attempt.display_filter,
+                state=state_names.get(item.state, item.state),
+                attempt_id=item.attempt_id,
+                label=item.label_ko,
+                summary=item.summary_ko,
+                observed=_event_labels(item.observed_event_types),
+                missing=_event_labels(item.missing_event_types),
+                first=item.first_frame,
+                last=item.last_frame,
+                duration=item.duration_ms,
+                count=item.event_count,
+                frames=_frames(item.evidence_frames),
+                display_filter=item.display_filter,
                 checks=checks,
             )
         )
-    if not lines:
-        lines.append(
-            "거래 별칭이 있는 EAP·RADIUS·DHCP·DNS·TCP 이벤트를 관찰하지 못했습니다."
-        )
+    if not attempts:
+        attempts.append("거래 별칭이 있는 프로토콜 이벤트를 관찰하지 못했습니다.")
     hidden = max(0, len(report.attempts) - limit)
     if hidden:
-        lines.append("거래 시도 {0:,}건은 GUI 상세 표시에서 생략했습니다.".format(hidden))
-
-    protocol_counts = " · ".join(
-        "{0} {1:,}건".format(protocol.upper(), count)
-        for protocol, count in report.attempts_by_protocol
-    ) or "없음"
-    state_counts = " · ".join(
-        "{0} {1:,}건".format(state_names.get(state, state), count)
-        for state, count in report.attempts_by_state
-    ) or "없음"
+        attempts.append(
+            "거래 시도 {0:,}건은 GUI 상세 표시에서 생략했습니다.".format(hidden)
+        )
     return (
         "\n\n[6. 비식별 거래 시도 요약]\n"
-        "요약 범위: {complete} · 거래 시도 {total:,}건 · 거래 미할당 이벤트 {unassigned:,}건\n"
-        "프로토콜별: {protocol_counts}\n"
-        "상태별: {state_counts}\n\n"
+        "요약 범위: {complete} · 거래 시도 {total:,}건 · 미할당 이벤트 {unassigned:,}건\n"
         "거래 시도:\n{attempts}\n"
         "주의: {cautions}\n"
-        "중요: 서로 다른 프로토콜 별칭을 동일 단말의 한 접속으로 자동 결합하지 않습니다."
+        "서로 다른 프로토콜 거래를 동일 단말 접속으로 자동 결합하지 않습니다."
     ).format(
         complete="전체" if report.complete else "일부",
         total=len(report.attempts),
         unassigned=report.unassigned_event_count,
-        protocol_counts=protocol_counts,
-        state_counts=state_counts,
-        attempts="\n\n".join(lines),
-        cautions=_compact(report.cautions, limit=8),
+        attempts="\n\n".join(attempts),
+        cautions=_compact(report.cautions, 8),
+    )
+
+
+def _format_devices(result: CaptureAnalysisResult, limit: int = 60) -> str:
+    run = result.protocol_inventory
+    if run is None or run.device_sessions is None:
+        return "\n\n[7. 분석 실행별 단말·AP 가명]\n단말 가명화 결과가 없습니다."
+    report = run.device_sessions
+    devices = []
+    for index, item in enumerate(report.devices[:limit], start=1):
+        protocols = _compact(item.protocols_observed, 12)
+        evidence = _compact(
+            tuple(_EVIDENCE_LABELS.get(value, value) for value in item.evidence_types),
+            10,
+        )
+        aps = _compact(item.ap_aliases, 10)
+        attempts = _compact(item.linked_attempt_ids, 15)
+        devices.append(
+            "{index}. {alias}\n"
+            "   프레임: #{first:,}~#{last:,} · 상대 지속시간 {duration:,}ms · "
+            "할당 프레임 {count:,}개\n"
+            "   확인 근거: {evidence}\n"
+            "   관찰 프로토콜: {protocols}\n"
+            "   관찰 AP 가명: {aps}\n"
+            "   연결된 거래 시도: {attempts}\n"
+            "   Wireshark 필터: {display_filter}".format(
+                index=index,
+                alias=item.alias,
+                first=item.first_frame,
+                last=item.last_frame,
+                duration=item.duration_ms,
+                count=item.frame_count,
+                evidence=evidence,
+                protocols=protocols,
+                aps=aps,
+                attempts=attempts,
+                display_filter=_display_filter(item.evidence_frames),
+            )
+        )
+    if not devices:
+        devices.append(
+            "802.11 관리·EAP·DHCP 클라이언트 근거에서 단말 가명을 만들지 못했습니다."
+        )
+    hidden = max(0, len(report.devices) - limit)
+    if hidden:
+        devices.append(
+            "단말 가명 {0:,}개는 GUI 상세 표시에서 생략했습니다.".format(hidden)
+        )
+    links = {
+        "linked": "단일 단말 연결",
+        "ambiguous": "모호함",
+        "unassigned": "미할당",
+    }
+    link_counts = {key: 0 for key in links}
+    for item in report.attempt_links:
+        link_counts[item.state] = link_counts.get(item.state, 0) + 1
+    link_summary = " · ".join(
+        "{0} {1:,}건".format(label, link_counts.get(state, 0))
+        for state, label in links.items()
+    )
+    return (
+        "\n\n[7. 분석 실행별 단말·AP 가명]\n"
+        "처리 범위: {complete} · 단말 가명 {total:,}개 · "
+        "미할당 프레임 {unassigned:,}개 · 모호 프레임 {ambiguous:,}개\n"
+        "거래 연결: {link_summary}\n\n"
+        "단말 가명:\n{devices}\n"
+        "주의: {cautions}\n"
+        "개인정보 경계: 원문 주소 직렬화 {raw} · HMAC 키 저장 {secret} · "
+        "실행 간 별칭 고정 {stable}\n"
+        "중요: DEVICE-N/AP-N은 현재 분석 실행에서만 유효하며 "
+        "사용자 신원이나 완전한 접속 세션을 확정하지 않습니다."
+    ).format(
+        complete="전체 처리" if report.complete else "일부 처리",
+        total=len(report.devices),
+        unassigned=report.frames_unassigned,
+        ambiguous=report.frames_ambiguous,
+        link_summary=link_summary,
+        devices="\n\n".join(devices),
+        cautions=_compact(report.cautions, 8),
+        raw="예" if report.raw_identifiers_serialized else "아니오",
+        secret="예" if report.alias_secret_persisted else "아니오",
+        stable="예" if report.aliases_stable_across_runs else "아니오",
     )
 
 
@@ -415,14 +501,15 @@ def format_analysis_detail(result: CaptureAnalysisResult) -> str:
     if result.inventory_state == "completed":
         return (
             detail
-            + _format_observations(result)
+            + _format_inventory(result)
             + _format_correlation(result)
             + _format_timeline(result)
-            + _format_transaction_sessions(result)
+            + _format_transactions(result)
+            + _format_devices(result)
         )
     return (
         detail
-        + "\n\n[2. 프로토콜·접속 단계·이벤트·거래 시도 분석]\n"
+        + "\n\n[2. 프로토콜·접속 단계·이벤트·거래·단말 가명 분석]\n"
         + ("실행 안 함" if result.inventory_state == "unavailable" else "실패")
         + ": "
         + result.inventory_message
@@ -476,7 +563,11 @@ class CaptureViewModel:
             self.structure = None
             self.capabilities = None
             self.analysis_result = None
-            self.state = CaptureViewState("파일을 사용할 수 없습니다.", str(exc), False)
+            self.state = CaptureViewState(
+                "파일을 사용할 수 없습니다.",
+                str(exc),
+                False,
+            )
             return self.state
         except Exception:
             self.capture = None
@@ -495,7 +586,7 @@ class CaptureViewModel:
         self.capabilities = result.capabilities
         self.analysis_result = result
         if result.inventory_state == "completed":
-            status = "캡처·Finding·이벤트 타임라인·거래 시도 분석을 완료했습니다."
+            status = "캡처·Finding·거래 시도·단말 가명 분석을 완료했습니다."
         elif result.inventory_state == "failed":
             status = "캡처 사전 점검은 완료했지만 상세 분석에 실패했습니다."
         else:
@@ -511,18 +602,25 @@ class CaptureViewModel:
 class MainWindow:
     def __init__(self, root: tk.Tk) -> None:
         self._root = root
-        self._vendor_root = Path(__file__).resolve().parents[3] / "vendor" / "wireshark"
+        self._vendor_root = (
+            Path(__file__).resolve().parents[3] / "vendor" / "wireshark"
+        )
         self._profile_path = (
             Path(__file__).resolve().parents[1]
             / "resources"
             / "tshark"
             / "field-profiles.v1.json"
         )
-        self._view_model = CaptureViewModel(self._vendor_root, self._profile_path)
+        self._view_model = CaptureViewModel(
+            self._vendor_root,
+            self._profile_path,
+        )
         self._status = tk.StringVar(value=self._view_model.state.status)
         bundle_status = inspect_bundle(self._vendor_root)
         self._tshark_status = tk.StringVar(value=bundle_status.message)
-        self._portable_status = tk.StringVar(value=_portable_status(bundle_status))
+        self._portable_status = tk.StringVar(
+            value=_portable_status(bundle_status)
+        )
         self._selection_generation = 0
         self._validation_cancel = threading.Event()
         self._closed = False
@@ -531,12 +629,16 @@ class MainWindow:
 
     def _build(self) -> None:
         self._root.title("WLAN 장애 분석기 KO")
-        self._root.minsize(920, 740)
+        self._root.minsize(940, 760)
 
         frame = ttk.Frame(self._root, padding=24)
         frame.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text="완전 오프라인", style="Accent.TLabel").pack(anchor="w")
+        ttk.Label(
+            frame,
+            text="완전 오프라인",
+            style="Accent.TLabel",
+        ).pack(anchor="w")
         ttk.Label(
             frame,
             text="무선 네트워크 패킷 장애 분석",
@@ -544,7 +646,10 @@ class MainWindow:
         ).pack(anchor="w", pady=(12, 4))
         ttk.Label(
             frame,
-            text="접속 단계 · 근거 Finding · 이벤트 타임라인 · 비식별 거래 시도",
+            text=(
+                "접속 단계 · 근거 Finding · 거래 시도 · "
+                "분석 실행별 DEVICE-N/AP-N"
+            ),
         ).pack(anchor="w")
 
         ttk.Separator(frame).pack(fill="x", pady=16)
@@ -563,7 +668,11 @@ class MainWindow:
             state="disabled",
         )
         self._cancel_button.pack(side="left", padx=(8, 0))
-        self._progress = ttk.Progressbar(controls, mode="indeterminate", length=180)
+        self._progress = ttk.Progressbar(
+            controls,
+            mode="indeterminate",
+            length=180,
+        )
         self._progress.pack(side="right")
 
         ttk.Label(
@@ -577,7 +686,7 @@ class MainWindow:
         self._detail_text = tk.Text(
             result_frame,
             wrap="word",
-            height=25,
+            height=26,
             padx=12,
             pady=10,
             state="disabled",
@@ -597,21 +706,28 @@ class MainWindow:
             frame,
             text="AI·외부 API·실시간 캡처·장비 접속을 사용하지 않습니다.",
         ).pack(anchor="w")
-        ttk.Label(frame, textvariable=self._tshark_status).pack(anchor="w", pady=(5, 0))
+        ttk.Label(
+            frame,
+            textvariable=self._tshark_status,
+        ).pack(anchor="w", pady=(5, 0))
         ttk.Label(
             frame,
             textvariable=self._portable_status,
-            wraplength=860,
+            wraplength=880,
         ).pack(anchor="w", pady=(3, 0))
         ttk.Label(
             frame,
             text=(
-                "거래 완료·실패는 패킷 이벤트 관찰 결과이며 근본 원인 확정을 뜻하지 않습니다. "
-                "서로 다른 프로토콜 거래를 동일 단말 접속으로 자동 결합하지 않습니다."
+                "원문 L2 주소와 가명화 키는 결과·로그·파일에 저장하지 않습니다. "
+                "DEVICE-N/AP-N은 실행할 때마다 새로 만들어집니다."
             ),
-            wraplength=860,
+            wraplength=880,
         ).pack(anchor="w", pady=(3, 0))
-        ttk.Button(frame, text="종료", command=self._close).pack(anchor="e", pady=(12, 0))
+        ttk.Button(
+            frame,
+            text="종료",
+            command=self._close,
+        ).pack(anchor="e", pady=(12, 0))
 
     def _set_detail(self, value: str) -> None:
         self._detail_text.configure(state="normal")
@@ -621,8 +737,12 @@ class MainWindow:
         self._detail_text.yview_moveto(0.0)
 
     def _set_busy(self, busy: bool) -> None:
-        self._select_button.configure(state="disabled" if busy else "normal")
-        self._cancel_button.configure(state="normal" if busy else "disabled")
+        self._select_button.configure(
+            state="disabled" if busy else "normal"
+        )
+        self._cancel_button.configure(
+            state="normal" if busy else "disabled"
+        )
         if busy:
             self._progress.start(12)
         else:
@@ -631,7 +751,10 @@ class MainWindow:
     def _choose_file(self) -> None:
         selected = filedialog.askopenfilename(
             title="로컬 패킷 캡처 선택",
-            filetypes=(("패킷 캡처", "*.pcap *.pcapng"), ("모든 파일", "*.*")),
+            filetypes=(
+                ("패킷 캡처", "*.pcap *.pcapng"),
+                ("모든 파일", "*.*"),
+            ),
         )
         if not selected:
             return
@@ -641,19 +764,30 @@ class MainWindow:
         self._validation_cancel.set()
         cancel_event = threading.Event()
         self._validation_cancel = cancel_event
-        self._status.set("캡처 구조·접속 단계·이벤트·거래 시도를 분석하고 있습니다.")
+        self._status.set(
+            "캡처 구조·접속 단계·거래 시도·단말 가명을 분석하고 있습니다."
+        )
         self._set_detail(
             "파일명과 패킷 원문은 화면과 로그에 표시하지 않습니다. "
-            "큰 캡처는 시간이 걸릴 수 있으며 언제든 분석 취소를 누를 수 있습니다."
+            "단말 가명은 현재 실행에서만 유효하며 분석 취소가 가능합니다."
         )
         self._set_busy(True)
 
         def analyze_in_background() -> None:
-            worker_view_model = CaptureViewModel(self._vendor_root, self._profile_path)
-            state = worker_view_model.select_capture(selected, cancel_event=cancel_event)
+            worker_view_model = CaptureViewModel(
+                self._vendor_root,
+                self._profile_path,
+            )
+            state = worker_view_model.select_capture(
+                selected,
+                cancel_event=cancel_event,
+            )
 
             def apply_result() -> None:
-                if generation != self._selection_generation or self._closed:
+                if (
+                    generation != self._selection_generation
+                    or self._closed
+                ):
                     return
                 self._view_model = worker_view_model
                 self._status.set(state.status)
@@ -667,7 +801,10 @@ class MainWindow:
             except (RuntimeError, tk.TclError):
                 return
 
-        threading.Thread(target=analyze_in_background, daemon=True).start()
+        threading.Thread(
+            target=analyze_in_background,
+            daemon=True,
+        ).start()
 
     def _cancel_analysis(self) -> None:
         self._validation_cancel.set()
