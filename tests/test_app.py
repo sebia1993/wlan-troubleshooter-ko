@@ -17,7 +17,7 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "4C")
+        self.assertEqual(result["phase"], "4D")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["ruleset_version"], "0.2.0")
@@ -25,10 +25,11 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["field_profile_version"], "0.4.0")
         self.assertEqual(result["inventory_field_count"], "5")
         self.assertEqual(result["event_field_count"], "32")
+        self.assertEqual(result["transaction_session_schema_version"], "1")
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
-        self.assertIn("이벤트 타임라인", result["analysis_features"])
+        self.assertIn("거래 시도", result["analysis_features"])
 
     def test_self_check_can_write_new_local_json_for_windowed_exe(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -38,8 +39,8 @@ class AppSmokeTests(unittest.TestCase):
             value = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(value["network_features"], "없음")
             self.assertEqual(value["python_external_required"], "true")
-            self.assertEqual(value["phase"], "4C")
-            self.assertEqual(value["event_field_count"], "32")
+            self.assertEqual(value["phase"], "4D")
+            self.assertEqual(value["transaction_session_schema_version"], "1")
             with self.assertRaises(FileExistsError):
                 main(["--self-check-output=" + str(output)])
 
@@ -63,7 +64,7 @@ class AppSmokeTests(unittest.TestCase):
             rendered = json.dumps(value, ensure_ascii=False)
 
             self.assertEqual(exit_code, 2)
-            self.assertEqual(value["schema_version"], 2)
+            self.assertEqual(value["schema_version"], 3)
             self.assertEqual(value["protocol_inventory_state"], "unavailable")
             self.assertNotIn(str(capture), rendered)
             self.assertNotIn(capture.name, rendered)
