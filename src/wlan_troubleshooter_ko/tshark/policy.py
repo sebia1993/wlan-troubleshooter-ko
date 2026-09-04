@@ -62,7 +62,6 @@ _PROFILE_REQUIRED_FIELDS = {
         "frame.protocols",
     },
 }
-_EAPOL_EAP_DECODE_AS = ["-d", "eapol.type==0,eap"]
 _FIELD_OUTPUT_PREFIX = [
     "-T",
     "fields",
@@ -206,6 +205,7 @@ def assert_safe_profile_argv(arguments: List[str]) -> None:
         not isinstance(arguments, list)
         or not all(isinstance(argument, str) for argument in arguments)
         or len(arguments) < 23
+        or (len(arguments) - 21) % 2
     ):
         raise TSharkPolicyError("프로파일 TShark 인자 구조가 올바르지 않습니다.")
     _assert_executable(arguments[0])
@@ -217,29 +217,12 @@ def assert_safe_profile_argv(arguments: List[str]) -> None:
     packet_limit = int(arguments[6], 10)
     if str(packet_limit) != arguments[6] or not 1 <= packet_limit <= 500_000:
         raise TSharkPolicyError("패킷 상한이 허용 범위를 벗어났습니다.")
-
-    cursor = 7
-    decode_as_enabled = arguments[cursor : cursor + 2] == _EAPOL_EAP_DECODE_AS
-    if decode_as_enabled:
-        cursor += 2
-    elif cursor < len(arguments) and arguments[cursor] == "-d":
-        raise TSharkPolicyError("승인되지 않은 Decode-As 설정입니다.")
-
-    if arguments[cursor : cursor + len(_FIELD_OUTPUT_PREFIX)] != _FIELD_OUTPUT_PREFIX:
+    if arguments[7:19] != _FIELD_OUTPUT_PREFIX:
         raise TSharkPolicyError("fields 출력 옵션이 승인된 고정 형식과 다릅니다.")
-    cursor += len(_FIELD_OUTPUT_PREFIX)
-    if (
-        cursor + 1 >= len(arguments)
-        or arguments[cursor] != "-Y"
-        or arguments[cursor + 1] not in APPROVED_DISPLAY_FILTERS.values()
-    ):
+    if arguments[19] != "-Y" or arguments[20] not in APPROVED_DISPLAY_FILTERS.values():
         raise TSharkPolicyError("승인되지 않은 Display Filter입니다.")
-    cursor += 2
-    fields = _read_field_pairs(arguments, cursor)
-
+    fields = _read_field_pairs(arguments, 21)
     event_profile = "frame.time_epoch" in fields
-    if event_profile != decode_as_enabled:
-        raise TSharkPolicyError("접속 이벤트 프로파일의 고정 EAP Decode-As가 일치하지 않습니다.")
     required_fields = _PROFILE_REQUIRED_FIELDS[
         "connection-events" if event_profile else "protocol-inventory"
     ]
@@ -264,7 +247,6 @@ def build_profile_argv(
     if not required_fields.issubset(selected_fields):
         raise TSharkPolicyError("추출 프로파일 필수 필드가 누락됐습니다.")
 
-    decode_as = _EAPOL_EAP_DECODE_AS if profile.profile_id == "connection-events" else []
     arguments = [
         str(bundle.executable),
         "-n",
@@ -273,7 +255,6 @@ def build_profile_argv(
         str(capture.path),
         "-c",
         str(profile.max_packets),
-        *decode_as,
         *_FIELD_OUTPUT_PREFIX,
         "-Y",
         display_filter,
