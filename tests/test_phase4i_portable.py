@@ -75,6 +75,14 @@ class Phase4IPortableTests(unittest.TestCase):
         ):
             self.assertIn(value, verifier)
 
+    def test_empty_missing_message_sequence_is_explicitly_supported(self):
+        verifier = self.text("tests/portable_build/verify_eapol_handshakes.ps1")
+        self.assertIn("[AllowEmptyCollection()]", verifier)
+        self.assertIn(
+            "$Observation.missing_message_numbers -Expected @()",
+            verifier,
+        )
+
     def test_fixture_is_generated_at_runtime_and_uses_radiotap(self):
         fixture = self.text(
             "tests/portable_build/generate_eapol_handshake_fixture.py"
