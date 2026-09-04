@@ -32,15 +32,18 @@ class Phase4FPortableTests(unittest.TestCase):
         ):
             self.assertIn(value, finalizer)
 
-    def test_journey_verifier_checks_actual_ethernet_scope_and_boundaries(self):
+    def test_journey_verifier_checks_direct_eapol_and_separate_radius_nad(self):
         verifier = self.text("tests/portable_build/verify_device_journeys.ps1")
         for value in (
+            "generate_device_journey_fixture.py",
             "device_journeys",
             "DEVICE-1",
             '"mixed"',
+            '"eap"',
             '"dhcp"',
             '"dns"',
             '"tcp"',
+            "RADIUS was linked",
             "first_failure_stage",
             "last_positive_stage",
             "raw_identifiers_serialized",
@@ -51,7 +54,27 @@ class Phase4FPortableTests(unittest.TestCase):
             "display_filter",
         ):
             self.assertIn(value, verifier)
-        self.assertNotIn('Get-Stage -Journey $Journey -Protocol "eap"', verifier)
+        self.assertIn(
+            'Get-Stage -Journey $Journey -Protocol "eap"',
+            verifier,
+        )
+        self.assertNotIn(
+            'Get-Stage -Journey $Journey -Protocol "radius"',
+            verifier,
+        )
+
+    def test_device_journey_fixture_changes_only_radius_l2_headers(self):
+        fixture = self.text(
+            "tests/portable_build/generate_device_journey_fixture.py"
+        )
+        for value in (
+            "generate_event_fixture.py",
+            "NAD_MAC",
+            "timestamp == 6",
+            "timestamp == 7",
+            "build_pcap",
+        ):
+            self.assertIn(value, fixture)
 
     def test_device_journey_schema_version_remains_available(self):
         project = self.text("pyproject.toml")
