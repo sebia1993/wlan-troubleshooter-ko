@@ -23,8 +23,37 @@ function Restore-EnvironmentValue {
     }
 }
 
+function Write-SafeAnalysisFailure {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$Output
+    )
+
+    if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) {
+        Write-Host "$Label analysis did not create a result file."
+        return
+    }
+    try {
+        $Failure = Get-Content -LiteralPath $Output -Raw | ConvertFrom-Json -Depth 96
+        $State = [string]$Failure.protocol_inventory_state
+        $Message = [string]$Failure.protocol_inventory_message
+        if ($State -notin @("completed", "unavailable", "failed")) {
+            $State = "invalid-result"
+        }
+        if ($Message.Length -gt 500) {
+            $Message = $Message.Substring(0, 500)
+        }
+        Write-Host "$Label analysis state: $State"
+        Write-Host "$Label analysis message: $Message"
+    }
+    catch {
+        Write-Host "$Label analysis result could not be parsed safely."
+    }
+}
+
 function Invoke-PortableAnalysis {
     param(
+        [Parameter(Mandatory = $true)][string]$Label,
         [Parameter(Mandatory = $true)][string]$Application,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string]$Capture,
@@ -37,12 +66,14 @@ function Invoke-PortableAnalysis {
     )
     $Process = Start-Process -FilePath $Application -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -Wait -PassThru
     if ($Process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Output -PathType Leaf)) {
-        throw "Portable transaction-session analysis failed."
+        Write-SafeAnalysisFailure -Label $Label -Output $Output
+        throw "Portable transaction-session analysis failed: $Label"
     }
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 96
     if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
-        throw "Portable transaction-session analysis did not complete with schema version 2."
+        Write-SafeAnalysisFailure -Label $Label -Output $Output
+        throw "Portable transaction-session analysis did not complete with schema version 2: $Label"
     }
     return [pscustomobject]@{ Raw = $Raw; Result = $Result }
 }
@@ -140,8 +171,8 @@ try {
         Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
         $env:PATH = (Join-Path $env:SystemRoot "System32") + ";" + $env:SystemRoot
         $Application = Join-Path $Expanded "WlanTroubleshooterKO.exe"
-        $Ethernet = Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $EthernetCapture -Output $EthernetOutput
-        $Eap = Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $EapCapture -Output $EapOutput
+        $Ethernet = Invoke-PortableAnalysis -Label "Ethernet" -Application $Application -WorkingDirectory $Expanded -Capture $EthernetCapture -Output $EthernetOutput
+        $Eap = Invoke-PortableAnalysis -Label "PPP-EAP" -Application $Application -WorkingDirectory $Expanded -Capture $EapCapture -Output $EapOutput
     }
     finally {
         $env:PATH = $OldPath
