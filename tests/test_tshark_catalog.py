@@ -41,40 +41,70 @@ class TSharkCatalogTests(unittest.TestCase):
             "protocol-inventory",
         )
 
-    def test_catalog_and_profile_resolve_deterministically(self):
+    def test_catalog_and_profiles_resolve_deterministically(self):
         catalog = parse_field_catalog(CATALOG_LINES)
         registry = load_field_profiles(self.registry_path())
         resolved = resolve_profile(registry, catalog, "protocol-inventory")
-        self.assertEqual(resolved.profile_version, "0.4.0")
+        self.assertEqual(resolved.profile_version, "0.5.0")
         self.assertEqual(resolved.headers()[0], "frame.number")
         self.assertEqual(resolved.output_keys()[-1], "protocols")
         self.assertEqual(resolved.missing_optional_fields, ())
         self.assertEqual(
             {item.profile_id for item in registry.profiles},
-            {"protocol-inventory", "connection-events"},
+            {
+                "protocol-inventory",
+                "connection-events",
+                "device-identities",
+            },
         )
         self.assertTrue(catalog.has_field("frame.protocols"))
 
-    def test_connection_profile_requires_time_epoch(self):
+    def test_connection_and_identity_profiles_require_time_epoch(self):
         registry = load_field_profiles(self.registry_path())
-        with self.assertRaises(FieldCompatibilityError):
-            resolve_profile(
-                registry,
-                parse_field_catalog(CATALOG_LINES),
-                "connection-events",
-            )
+        catalog = parse_field_catalog(CATALOG_LINES)
+        for profile_id in ("connection-events", "device-identities"):
+            with self.subTest(profile_id=profile_id):
+                with self.assertRaises(FieldCompatibilityError):
+                    resolve_profile(registry, catalog, profile_id)
 
-        catalog = parse_field_catalog(
+        extended = parse_field_catalog(
             CATALOG_LINES
             + [
                 "F\tEpoch time\tframe.time_epoch\tFT_RELATIVE_TIME\tframe\t\t0x0\t\n"
             ]
         )
-        resolved = resolve_profile(registry, catalog, "connection-events")
-        self.assertEqual(resolved.profile_version, "0.4.0")
-        self.assertIn("frame.time_epoch", resolved.headers())
-        self.assertIn("eap_code", resolved.missing_optional_fields)
-        self.assertIn("tls_handshake_type", resolved.missing_optional_fields)
+        events = resolve_profile(registry, extended, "connection-events")
+        identities = resolve_profile(registry, extended, "device-identities")
+        self.assertEqual(events.profile_version, "0.5.0")
+        self.assertEqual(identities.profile_version, "0.5.0")
+        self.assertIn("frame.time_epoch", events.headers())
+        self.assertIn("frame.time_epoch", identities.headers())
+        self.assertIn("eap_code", events.missing_optional_fields)
+        self.assertIn("eth_source", identities.missing_optional_fields)
+        self.assertIn("wlan_bssid", identities.missing_optional_fields)
+
+    def test_identity_profile_resolves_reviewed_l2_fields_only(self):
+        registry = load_field_profiles(self.registry_path())
+        extra = [
+            "F\tEpoch time\tframe.time_epoch\tFT_RELATIVE_TIME\tframe\t\t0x0\t\n",
+            "F\tEthernet source\teth.src\tFT_ETHER\teth\t\t0x0\t\n",
+            "F\tEthernet destination\teth.dst\tFT_ETHER\teth\t\t0x0\t\n",
+            "F\tWLAN source\twlan.sa\tFT_ETHER\twlan\t\t0x0\t\n",
+            "F\tWLAN destination\twlan.da\tFT_ETHER\twlan\t\t0x0\t\n",
+            "F\tWLAN BSSID\twlan.bssid\tFT_ETHER\twlan\t\t0x0\t\n",
+        ]
+        resolved = resolve_profile(
+            registry,
+            parse_field_catalog(CATALOG_LINES + extra),
+            "device-identities",
+        )
+        self.assertEqual(
+            set(resolved.headers())
+            & {"eth.src", "eth.dst", "wlan.sa", "wlan.da", "wlan.bssid"},
+            {"eth.src", "eth.dst", "wlan.sa", "wlan.da", "wlan.bssid"},
+        )
+        self.assertNotIn("ip.src", resolved.headers())
+        self.assertNotIn("wlan.ssid", resolved.headers())
 
     def test_missing_optional_field_is_recorded(self):
         catalog = parse_field_catalog(
@@ -123,7 +153,10 @@ class TSharkCatalogTests(unittest.TestCase):
         with self.assertRaises(FieldCatalogError):
             parse_field_catalog(CATALOG_LINES, max_records=2)
         with self.assertRaises(FieldCatalogError):
-            parse_field_catalog(CATALOG_LINES + ["F\tBad\tbad.field\x00\tFT_STRING\tbad\t\t0x0\t\n"])
+            parse_field_catalog(
+                CATALOG_LINES
+                + ["F\tBad\tbad.field\x00\tFT_STRING\tbad\t\t0x0\t\n"]
+            )
 
     def test_profile_loader_rejects_unknown_key_and_duplicate_json_key(self):
         original = json.loads(self.registry_path().read_text(encoding="utf-8"))
@@ -131,13 +164,17 @@ class TSharkCatalogTests(unittest.TestCase):
             unknown = Path(directory) / "unknown.json"
             changed = dict(original)
             changed["unexpected"] = True
-            unknown.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+            unknown.write_text(
+                json.dumps(changed, ensure_ascii=False),
+                encoding="utf-8",
+            )
             with self.assertRaises(FieldProfileError):
                 load_field_profiles(unknown)
 
             duplicate = Path(directory) / "duplicate.json"
             duplicate.write_text(
-                '{"schema_version":1,"schema_version":1,"profile_version":"0.4.0","profiles":[],"protocol_groups":[]}',
+                '{"schema_version":1,"schema_version":1,'
+                '"profile_version":"0.5.0","profiles":[],"protocol_groups":[]}',
                 encoding="utf-8",
             )
             with self.assertRaises(FieldProfileError):
@@ -145,17 +182,29 @@ class TSharkCatalogTests(unittest.TestCase):
 
     def test_fields_output_accepts_quoted_unquoted_and_mixed_cells(self):
         profile = self.resolved_profile()
-        quoted_header = "\t".join('"{0}"'.format(item) for item in profile.headers())
+        quoted_header = "\t".join(
+            '"{0}"'.format(item) for item in profile.headers()
+        )
         quoted_row = '"1"\t"0"\t"100"\t"100"\t"eth:ip:udp:dns"'
         self.assertEqual(
-            list(iter_fields_rows(quoted_header + "\n" + quoted_row + "\n", profile)),
+            list(
+                iter_fields_rows(
+                    quoted_header + "\n" + quoted_row + "\n",
+                    profile,
+                )
+            ),
             [("1", "0", "100", "100", "eth:ip:udp:dns")],
         )
 
         plain_header = "\t".join(profile.headers())
         plain_row = "1\t0\t100\t100\teth:ip:udp:dns"
         self.assertEqual(
-            list(iter_fields_rows(plain_header + "\n" + plain_row + "\n", profile)),
+            list(
+                iter_fields_rows(
+                    plain_header + "\n" + plain_row + "\n",
+                    profile,
+                )
+            ),
             [("1", "0", "100", "100", "eth:ip:udp:dns")],
         )
 
@@ -165,7 +214,12 @@ class TSharkCatalogTests(unittest.TestCase):
         )
         mixed_row = '"1"\t\t"100"\t100\teth:arp'
         self.assertEqual(
-            list(iter_fields_rows(mixed_header + "\n" + mixed_row + "\n", profile)),
+            list(
+                iter_fields_rows(
+                    mixed_header + "\n" + mixed_row + "\n",
+                    profile,
+                )
+            ),
             [("1", "", "100", "100", "eth:arp")],
         )
 
@@ -187,7 +241,7 @@ class TSharkCatalogTests(unittest.TestCase):
                 )
             )
         with self.assertRaises(FieldsOutputError):
-            list(iter_fields_rows('frame.protocols\ndns\n', profile))
+            list(iter_fields_rows("frame.protocols\ndns\n", profile))
 
 
 if __name__ == "__main__":
