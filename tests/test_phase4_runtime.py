@@ -198,7 +198,7 @@ class Phase4RuntimeTests(unittest.TestCase):
         )
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
-    def test_service_returns_identifier_free_inventory_stage_and_timeline(self, popen):
+    def test_service_returns_identifier_free_inventory_stage_timeline_and_sessions(self, popen):
         root, vendor, capture, _workspace = self.setup_paths()
         popen.side_effect = [
             FakeProcess(CATALOG_TEXT.encode("utf-8")),
@@ -217,11 +217,13 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(result.protocol_inventory)
         self.assertIsNotNone(result.protocol_inventory.event_correlation)
         self.assertIsNotNone(result.protocol_inventory.event_timeline)
+        self.assertIsNotNone(result.protocol_inventory.transaction_sessions)
         text = json.dumps(serialized, ensure_ascii=False)
         self.assertNotIn(str(capture), text)
         self.assertNotIn(capture.name, text)
         self.assertNotIn("192.0.2", text)
         self.assertNotIn("1700000000", text)
+        self.assertEqual(serialized["schema_version"], 2)
         self.assertEqual(
             serialized["protocol_inventory"]["inventory"]["frames_observed"],
             2,
@@ -233,6 +235,10 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertEqual(
             serialized["protocol_inventory"]["event_timeline"]["frames_observed"],
             2,
+        )
+        self.assertEqual(
+            serialized["protocol_inventory"]["transaction_sessions"]["attempts_total"],
+            0,
         )
         self.assertEqual(popen.call_count, 2)
 

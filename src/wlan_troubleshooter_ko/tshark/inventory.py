@@ -19,6 +19,10 @@ from wlan_troubleshooter_ko.analysis.protocol_inventory import (
     ProtocolInventory,
     build_protocol_inventory,
 )
+from wlan_troubleshooter_ko.analysis.transaction_sessions import (
+    TransactionSessionReport,
+    build_transaction_sessions,
+)
 from wlan_troubleshooter_ko.core.capture import CaptureInfo, validate_capture
 from wlan_troubleshooter_ko.tshark.catalog import FieldCatalog, parse_field_catalog
 from wlan_troubleshooter_ko.tshark.manifest import verify_bundle
@@ -146,6 +150,7 @@ class ProtocolInventoryRun:
     inventory: ProtocolInventory
     event_correlation: Optional[EventCorrelation] = None
     event_timeline: Optional[EventTimeline] = None
+    transaction_sessions: Optional[TransactionSessionReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -165,6 +170,11 @@ class ProtocolInventoryRun:
                 None
                 if self.event_timeline is None
                 else self.event_timeline.to_dict()
+            ),
+            "transaction_sessions": (
+                None
+                if self.transaction_sessions is None
+                else self.transaction_sessions.to_dict()
             ),
         }
 
@@ -325,7 +335,7 @@ def run_connection_analysis(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> ProtocolInventoryRun:
-    """한 번의 fields 출력에서 인벤토리·Finding·이벤트 타임라인을 만든다."""
+    """한 번의 fields 출력에서 인벤토리·Finding·타임라인·거래 시도를 만든다."""
 
     if not workspace_root.is_dir():
         raise TSharkExecutionError("접속 단계 분석 작업공간이 준비되지 않았습니다.")
@@ -369,6 +379,7 @@ def run_connection_analysis(
         adapt_connection_profile_for_timeline(resolved_profile),
         expected_frames=expected_frames,
     )
+    transaction_sessions = build_transaction_sessions(timeline)
     return ProtocolInventoryRun(
         bundle_version=fields_result.bundle_version,
         manifest_sha256=fields_result.manifest_sha256,
@@ -377,4 +388,5 @@ def run_connection_analysis(
         inventory=inventory,
         event_correlation=correlation,
         event_timeline=timeline,
+        transaction_sessions=transaction_sessions,
     )

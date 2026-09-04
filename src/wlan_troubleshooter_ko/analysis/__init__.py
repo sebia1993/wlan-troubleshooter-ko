@@ -1,4 +1,4 @@
-"""결정론적 캡처 점검, 인벤토리, Finding과 이벤트 타임라인."""
+"""결정론적 캡처 점검, Finding, 타임라인과 비식별 거래 시도."""
 
 from wlan_troubleshooter_ko.analysis.event_correlation import (
     DiagnosticFinding,
@@ -36,6 +36,12 @@ from wlan_troubleshooter_ko.analysis.service import (
     CaptureAnalysisResult,
     analyze_capture,
 )
+from wlan_troubleshooter_ko.analysis.transaction_sessions import (
+    TransactionAttempt,
+    TransactionSessionError,
+    TransactionSessionReport,
+    build_transaction_sessions,
+)
 
 __all__ = [
     "CaptureAnalysisError",
@@ -56,10 +62,14 @@ __all__ = [
     "ProtocolObservation",
     "StageAssessment",
     "StageSummary",
+    "TransactionAttempt",
+    "TransactionSessionError",
+    "TransactionSessionReport",
     "analyze_capture",
     "build_event_correlation",
     "build_event_timeline",
     "build_protocol_inventory",
+    "build_transaction_sessions",
     "classify_capture_capabilities",
     "inspect_capture_structure",
 ]

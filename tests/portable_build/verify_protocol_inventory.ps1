@@ -119,7 +119,7 @@ try {
         throw "Portable connection analysis did not create its result."
     }
     $Raw = Get-Content -LiteralPath $Output -Raw
-    $Result = $Raw | ConvertFrom-Json -Depth 64
+    $Result = $Raw | ConvertFrom-Json -Depth 96
     if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
         Write-SafeFailureSummary -ResultPath $Output
         throw "Portable connection analysis did not complete with schema version 2."
@@ -156,13 +156,42 @@ try {
         }
     }
 
+    $Sessions = $Result.protocol_inventory.transaction_sessions
+    if (
+        $null -eq $Sessions -or
+        $Sessions.schema_version -ne 1 -or
+        $Sessions.complete -ne $true -or
+        $Sessions.attempts_total -ne 2
+    ) {
+        throw "Portable transaction session report is missing or incomplete."
+    }
+    $Attempts = @($Sessions.attempts)
+    foreach ($ExpectedAttemptId in @("DNS-1-A1", "TCP-1-A1")) {
+        $Attempt = $Attempts | Where-Object { $_.attempt_id -eq $ExpectedAttemptId } | Select-Object -First 1
+        if ($null -eq $Attempt) {
+            throw "Portable transaction session is missing: $ExpectedAttemptId"
+        }
+        if ($Attempt.state -ne "failure-observed") {
+            throw "Portable explicit failure transaction has an unexpected state: $ExpectedAttemptId"
+        }
+        if (
+            $Attempt.root_cause_confirmed -ne $false -or
+            $Attempt.device_session_confirmed -ne $false -or
+            [string]::IsNullOrWhiteSpace([string]$Attempt.display_filter) -or
+            @($Attempt.evidence_frames).Count -lt 1
+        ) {
+            throw "Portable transaction session violated the conservative evidence boundary: $ExpectedAttemptId"
+        }
+    }
+
     if (
         $Raw.Contains($Capture, [System.StringComparison]::OrdinalIgnoreCase) -or
         $Raw.Contains((Split-Path -Leaf $Capture), [System.StringComparison]::OrdinalIgnoreCase) -or
         $Raw.Contains("192.0.2.1", [System.StringComparison]::OrdinalIgnoreCase) -or
-        $Raw.Contains("example.test", [System.StringComparison]::OrdinalIgnoreCase)
+        $Raw.Contains("example.test", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $Raw.Contains("0x1234", [System.StringComparison]::OrdinalIgnoreCase)
     ) {
-        throw "Portable analysis result exposed a capture path, name, address, or DNS query."
+        throw "Portable analysis result exposed a capture path, name, address, DNS query, or transaction identifier."
     }
 
     $AfterFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
@@ -171,7 +200,7 @@ try {
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
         throw "Portable analysis modified its distribution directory."
     }
-    Write-Host "Portable DNS NXDOMAIN and TCP RST Finding integration test passed."
+    Write-Host "Portable DNS and TCP failure Finding plus transaction-session integration test passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -1,21 +1,21 @@
 # wlan-troubleshooter-ko
 
-Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 분석하여, 초급 네트워크 엔지니어에게 **접속 단계, 확인된 실패 응답, 근거 프레임, 다음 점검 항목과 시간순 이벤트**를 쉬운 한국어로 안내하는 도구입니다.
+Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 분석하여, 초급 네트워크 엔지니어에게 **접속 단계, 확인된 실패 응답, 시간순 이벤트와 프로토콜 거래 시도**를 쉬운 한국어로 안내하는 도구입니다.
 
 AI로 원인을 생성하지 않습니다. 프로그램 런타임에는 외부 API, 인터넷 통신, 텔레메트리, 자동 업데이트와 온라인 조회가 없습니다.
 
 ## 가장 쉬운 실행 방법
 
-`v0.6.0-alpha.1` 릴리즈에서 다음 파일을 받습니다.
+`v0.7.0-alpha.1` 릴리즈에서 다음 파일을 받습니다.
 
 ```text
-WlanTroubleshooterKO-v0.6.0-alpha.1-win64-portable.zip
+WlanTroubleshooterKO-v0.7.0-alpha.1-win64-portable.zip
 ```
 
 1. ZIP을 로컬 폴더에 완전히 압축 해제합니다.
 2. 압축을 푼 폴더의 `WlanTroubleshooterKO.exe`를 실행합니다.
 3. `PCAP 또는 PCAPNG 파일 선택`을 누릅니다.
-4. 사전 점검, 프로토콜 인벤토리, 접속 단계, Finding과 이벤트 타임라인을 확인합니다.
+4. 사전 점검, 인벤토리, Finding, 이벤트 타임라인과 거래 시도 요약을 확인합니다.
 
 ZIP 안에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.js, 관리자 권한과 인터넷 연결은 필요하지 않습니다.
 
@@ -36,7 +36,7 @@ ZIP 안에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.j
 
 ### 3. 접속 단계 요약
 
-다음 단계를 각각 `성공 응답 관찰`, `실패 응답 관찰`, `성공·실패 혼합`, `진행 중 또는 불완전`, `관찰되지 않음`, `판단 불가`로 구분합니다.
+다음 단계를 `성공 응답 관찰`, `실패 응답 관찰`, `성공·실패 혼합`, `진행 중 또는 불완전`, `관찰되지 않음`, `판단 불가`로 구분합니다.
 
 ```text
 무선 연결
@@ -62,7 +62,7 @@ TCP 연결
 | DNS 오류 | 응답 RCODE가 0이 아님 |
 | TCP 연결 재설정 | TCP RST 플래그가 설정됨 |
 
-각 Finding에는 등급, 단계, 한국어 설명, 근거 프레임 번호, `frame.number` Display Filter와 다음 점검 항목이 포함됩니다. Deauthentication·Disassociation과 TCP 재전송은 다른 상황에서도 발생할 수 있어 `참고`로만 표시합니다.
+각 Finding에는 등급, 단계, 한국어 설명, 근거 프레임, `frame.number` Display Filter와 다음 점검 항목이 포함됩니다. Deauthentication·Disassociation과 TCP 재전송은 `참고`로만 표시합니다.
 
 ### 5. 비식별 이벤트 타임라인
 
@@ -70,32 +70,65 @@ TCP 연결
 
 | 범주 | 표시 이벤트 |
 |---|---|
-| IEEE 802.11 | 인증 요청·응답, Association/Reassociation 요청·응답, Deauthentication, Disassociation, Retry |
+| IEEE 802.11 | 인증, Association/Reassociation, Deauthentication, Disassociation, Retry |
 | EAPOL | Start, Logoff, EAP Packet, Key, 확인 가능한 메시지 번호 1~4 |
 | EAP | Request, Response, Success, Failure |
-| RADIUS | Access-Request, Access-Challenge, Access-Accept, Access-Reject, Accounting |
+| RADIUS | Access-Request, Challenge, Accept, Reject, Accounting |
 | DHCP | Discover, Offer, Request, ACK, NAK, Decline, Release, Inform |
 | DNS | Query, 정상 Response, 오류 Response |
 | ARP | Request, Reply |
 | TCP | SYN, SYN/ACK, RST, Retransmission 표시 |
 | TLS | ClientHello, ServerHello, Certificate, Finished |
 
-각 이벤트에는 상대 시간, 프레임 번호, 한국어 이벤트명, 명시적 코드, 로컬 상관 별칭과 재확인용 `frame.number == N` 필터만 표시합니다.
+각 이벤트에는 상대 시간, 프레임 번호, 이벤트명, 명시적 코드, 로컬 상관 별칭과 `frame.number == N` 필터만 표시합니다.
 
 ```text
 +1,245ms · 프레임 #44 · DHCP ACK · 상관 별칭 DHCP-1 · 코드 5
 Wireshark 필터: frame.number == 44
 ```
 
-상관 별칭은 원본 거래 ID나 스트림 번호가 아닙니다.
+### 6. 비식별 프로토콜 거래 시도
+
+이벤트 타임라인의 로컬 별칭을 사용해 같은 프로토콜 거래를 시도 단위로 요약합니다.
 
 ```text
-EAP-1
-RADIUS-1
-DHCP-1
-DNS-1
-TCP-1
+EAP-1-A1
+RADIUS-1-A1
+DHCP-1-A1
+DNS-1-A1
+TCP-1-A1
 ```
+
+`A1`, `A2`는 같은 로컬 거래 별칭이 종료 응답 뒤 재사용될 때 구분하는 시도 번호입니다.
+
+| 프로토콜 | `필요 순서 완료 관찰` 기준 |
+|---|---|
+| EAP | Request → Response → Success |
+| RADIUS | Access-Request → Access-Accept |
+| DHCP | Discover → Offer → Request → ACK |
+| DNS | Query → 정상 Response |
+| TCP | 현재 최종 ACK를 식별하지 않으므로 완전한 3-Way Handshake 완료로 표시하지 않음 |
+
+각 거래 시도는 다음 상태 중 하나입니다.
+
+| 상태 | 의미 |
+|---|---|
+| 필요 순서 완료 관찰 | 요청부터 명시적인 성공 결과까지 필요한 순서가 관찰됨 |
+| 성공 결과만 관찰 | Success·Accept·ACK·정상 응답은 있으나 시작 부분이 없음 |
+| 실패 결과 관찰 | Failure·Reject·NAK·DNS 오류·TCP RST가 관찰됨 |
+| 성공·실패 혼재 | 같은 비식별 별칭에서 성공과 실패가 함께 보임 |
+| 최종 결과 미확인 | 요청 또는 중간 이벤트만 관찰됨 |
+
+예시는 다음과 같습니다.
+
+```text
+[필요 순서 완료 관찰] DHCP-1-A1 · DHCP 주소 할당
+관찰 이벤트: DHCP Discover → DHCP Offer → DHCP Request → DHCP ACK
+프레임: #21~#28 · 상대 지속시간 843ms
+근거 필터: frame.number == 21 || frame.number == 23 || frame.number == 26 || frame.number == 28
+```
+
+거래 시도 결과에는 `root_cause_confirmed=false`, `device_session_confirmed=false`가 고정됩니다. 거래 완료는 해당 프로토콜 순서의 관찰일 뿐이며 근본 원인이나 동일 단말 접속을 확정하지 않습니다.
 
 ## 해석 원칙
 
@@ -104,14 +137,15 @@ EAP Success 관찰 ≠ 전체 접속 성공 확정
 RADIUS Access-Accept 관찰 ≠ 사용자 서비스 정상 확정
 RADIUS Access-Reject 관찰 ≠ ClearPass 자체 장애 확정
 DHCP ACK 관찰 ≠ 이후 통신 정상 확정
+TCP SYN/ACK 관찰 ≠ 최종 ACK까지 완료 확정
 TCP RST 관찰 ≠ 서버·방화벽·애플리케이션 중 원인 확정
 TCP Retransmission 관찰 ≠ RF 장애 확정
 프로토콜 미관찰 ≠ 해당 단계 장애
 ```
 
-기본 결과에는 단말 식별자를 사용하지 않습니다. 여러 단말과 여러 접속이 섞인 캡처를 하나의 세션으로 자동 결합하지 않으며, 성공과 실패가 함께 보이면 혼재 상태로 표시합니다. EAPOL Key 메시지 번호 1~4가 모두 보여도 동일 단말의 한 번의 4-Way Handshake라고 확정하지 않습니다.
+서로 다른 `EAP-1`, `RADIUS-1`, `DHCP-1`, `DNS-1`, `TCP-1`을 동일 단말의 한 접속으로 자동 결합하지 않습니다. 원본 단말 식별정보가 없는 상태에서 여러 단말과 접속을 섞어 잘못 연결하는 것을 방지하기 위한 제한입니다.
 
-DHCP·DNS·TCP 요청 뒤 응답이 보이지 않은 경우에도 캡처 누락 가능성이 있으므로 `판단 불가`로 유지합니다. 일부 프레임만 처리했거나 후속 시간이 짧으면 미응답 Finding 자체를 만들지 않습니다.
+DHCP·DNS·TCP 요청 뒤 응답이 보이지 않아도 캡처 누락 가능성이 있으므로 장애로 확정하지 않습니다. 일부 프레임만 처리됐거나 이벤트 보관 상한으로 상세 이벤트가 생략되면 거래 보고서 전체를 일부 결과로 표시합니다.
 
 ## 데이터 보호
 
@@ -144,12 +178,12 @@ TShark 표준 오류 원문
 - 빈 설정·플러그인·extcap·임시 디렉터리 사용
 - stdout·stderr 동시 처리로 교착 방지
 - 출력 크기·실행시간·패킷 수 상한
-- 상세 이벤트 2,000개 보관 상한과 유형별 전체 집계 유지
+- 상세 이벤트 2,000개, 거래 별칭 50,000개, 거래별 이벤트 200,000개 상한
 - TShark 표준 오류 원문 폐기
 - 분석 취소 지원
 - 종료 후 임시 작업공간 자동 삭제
 
-프로토콜 인벤토리, Finding과 타임라인은 캡처를 다시 읽지 않고 동일한 한 번의 고정 fields 출력에서 생성합니다.
+인벤토리, Finding, 타임라인과 거래 시도는 캡처를 다시 읽지 않고 동일한 한 번의 고정 fields 출력에서 생성합니다.
 
 ## Portable 패키지 구성
 
@@ -169,16 +203,17 @@ Wireshark GUI, `dumpcap.exe`, Npcap 설치 파일과 extcap 실행 도구는 포
 릴리즈에는 Portable ZIP과 같은 이름의 `.sha256` 파일이 제공됩니다.
 
 ```powershell
-Get-FileHash .\WlanTroubleshooterKO-v0.6.0-alpha.1-win64-portable.zip -Algorithm SHA256
+Get-FileHash .\WlanTroubleshooterKO-v0.7.0-alpha.1-win64-portable.zip -Algorithm SHA256
 ```
 
 출력값이 `.sha256` 파일과 같은지 확인합니다. 애플리케이션 EXE의 상용 코드 서명 인증서는 아직 없으므로 Windows가 `알 수 없는 게시자` 경고를 표시할 수 있습니다.
 
 ## 아직 지원하지 않는 기능
 
-- MAC·SSID를 결과에 노출하지 않는 단말별 익명 세션 분리
-- 동일 단말의 완전한 EAP·RADIUS·4-Way Handshake 세션 결합
-- 응답 미관찰과 캡처 누락의 자동 확정 구분
+- 원본 MAC·SSID를 결과에 노출하지 않는 단말별 익명 세션 분리
+- 서로 다른 EAP·RADIUS·DHCP·DNS·TCP 거래를 동일 단말 접속으로 연결
+- 동일 단말의 EAPOL 4-Way Handshake 메시지 1~4 완결성 판정
+- 응답 미관찰과 캡처 누락·단방향 수집의 자동 구분
 - BSSID·채널·RSSI 기반 로밍·RF 장애 상관분석
 - ClearPass 정책·Role·VLAN의 구체적 원인 판정
 - 최종 오프라인 한국어 HTML 보고서
@@ -186,4 +221,4 @@ Get-FileHash .\WlanTroubleshooterKO-v0.6.0-alpha.1-win64-portable.zip -Algorithm
 - 장비 로그인·조회·설정 변경
 - 온라인 OUI·WHOIS·GeoIP 조회
 
-세부 구현 경계는 `docs/PHASE_4C_PLAN.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`, 제3자 고지는 `THIRD_PARTY_NOTICES.md`를 확인합니다.
+세부 구현 경계는 `docs/PHASE_4D_PLAN.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`, 제3자 고지는 `THIRD_PARTY_NOTICES.md`를 확인합니다.

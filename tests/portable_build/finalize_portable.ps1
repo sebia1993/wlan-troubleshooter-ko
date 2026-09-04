@@ -155,6 +155,12 @@ try {
     else {
         $BuildInfo | Add-Member -NotePropertyName event_timeline_runtime -NotePropertyValue "enabled"
     }
+    if ($BuildInfo.PSObject.Properties.Name -contains "transaction_session_runtime") {
+        $BuildInfo.transaction_session_runtime = "enabled"
+    }
+    else {
+        $BuildInfo | Add-Member -NotePropertyName transaction_session_runtime -NotePropertyValue "enabled"
+    }
     $BuildInfo | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $BuildInfoPath -Encoding utf8
 
     $Executables = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File -Filter "*.exe" | ForEach-Object {

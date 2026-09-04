@@ -51,9 +51,9 @@ def self_check() -> Dict[str, str]:
         verified = verify_bundle(vendor_root)
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
-        analysis_execution = "활성 · 접속 단계 Finding과 비식별 이벤트 타임라인"
+        analysis_execution = "활성 · 접속 단계 Finding·이벤트 타임라인·거래 시도 요약"
     return {
-        "phase": "4C",
+        "phase": "4D",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "rule_count": str(len(rules["rules"])),
@@ -62,6 +62,7 @@ def self_check() -> Dict[str, str]:
         "field_profile_version": field_registry.profile_version,
         "inventory_field_count": str(len(inventory_profile.fields)),
         "event_field_count": str(len(event_profile.fields)),
+        "transaction_session_schema_version": "1",
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
         "python_external_required": "true" if _external_python_required() else "false",
@@ -69,8 +70,8 @@ def self_check() -> Dict[str, str]:
         "portable_tshark": tshark_status,
         "protocol_inventory_execution": analysis_execution,
         "analysis_features": (
-            "캡처 구조 점검 + 프로토콜 존재 인벤토리 + 접속 단계 상관분석 + "
-            "근거 기반 Finding + 비식별 이벤트 타임라인"
+            "캡처 구조 점검 + 프로토콜 인벤토리 + 접속 단계 Finding + "
+            "비식별 이벤트 타임라인 + 거래 시도 완결성 요약"
         ),
         "network_features": "없음",
     }
