@@ -14,32 +14,39 @@
 | Phase 4A 실제 프로토콜 존재 인벤토리 | 구현 완료·Windows 실분석 통과 | 내장 TShark `-G fields`·`-T fields`, GUI, 취소, 식별자 없는 결과 |
 | Phase 4B 접속 단계·근거 Finding | 구현 완료·릴리즈 게시 | 명시적 실패 Finding, 미응답 안전 제한, `v0.5.0-alpha.1` |
 | Phase 4C 비식별 이벤트 타임라인 | 구현 완료·릴리즈 게시 | 시간순 이벤트·로컬 별칭·Portable 실제 분석, `v0.6.0-alpha.1` |
-| Phase 4D 비식별 프로토콜 거래 시도 | 구현 완료·최종 검증 진행 | EAP·RADIUS·DHCP·DNS·TCP 시도 분리와 보수적 완결성 |
-| `v0.7.0-alpha.1` Win64 Portable | 병합 후 게시 예정 | 거래 시도 실제 패킷 검증 게이트와 릴리즈 자동화 준비 |
+| Phase 4D 비식별 프로토콜 거래 시도 | 구현 완료·Windows 및 Portable 검증 통과 | EAP·RADIUS·DHCP·DNS·TCP 시도 분리와 보수적 완결성 |
+| `v0.7.0-alpha.1` Win64 Portable | 게시 완료 | Python·Wireshark 미설치 PC용 ZIP, SHA-256, 대응 Wireshark 소스 |
 | 단말별 익명 세션 분리 | 미착수 | 다음 Phase 범위 |
 | 최종 오프라인 HTML 보고서 | 미착수 | 단말 세션·상관 정확도 확보 이후 범위 |
 
+## Phase 4D 병합
+
+- PR: `#8 Phase 4D: 비식별 프로토콜 거래 시도 요약 및 v0.7.0-alpha.1`
+- 병합 커밋: `15d0ba1a26d4d1407db35f98527539562f850dab`
+- 병합 후 Windows CI: 실행 146번 성공
+- 병합 후 Win64 Portable Preview Release: 실행 8번 성공
+
 ## Phase 4D 구현 기능
 
-- Phase 4C의 `EAP-N`, `RADIUS-N`, `DHCP-N`, `DNS-N`, `TCP-N` 별칭만 사용
+- Phase 4C의 `EAP-N`, `RADIUS-N`, `DHCP-N`, `DNS-N`, `TCP-N` 비식별 별칭만 사용
 - 같은 별칭이 명시적 종료 이벤트 뒤 재사용되면 `A1`, `A2` 거래 시도로 분리
 - EAP Request → Response → Success 완결성
 - RADIUS Access-Request → Access-Accept 완결성 및 Access-Reject
 - DHCP Discover → Offer → Request → ACK 완결성 및 NAK
 - DNS Query → 정상 Response 완결성 및 오류 Response
-- TCP SYN → SYN/ACK 성공 방향 관찰 및 RST 실패 결과
+- TCP SYN → SYN/ACK 성공 방향 관찰 및 TCP RST 실패 결과
 - `complete`, `success-observed`, `failure-observed`, `mixed`, `incomplete` 상태
 - 첫·마지막 프레임, 상대 지속시간, 관찰 이벤트와 미관찰 순서 요소
 - 시도별 `frame.number` Wireshark 근거 필터와 다음 점검 항목
 - GUI `[6. 비식별 거래 시도 요약]`
-- 비대화형 JSON의 하위 호환 가능한 `transaction_sessions` 추가 결과
+- 기존 분석 JSON 스키마 버전 2를 유지하면서 `transaction_sessions` 추가 결과 제공
 
 ## 판정 안전 기준
 
 - 모든 거래 시도는 `root_cause_confirmed=false`를 유지합니다.
 - 모든 거래 시도는 `device_session_confirmed=false`를 유지합니다.
 - 프로토콜 거래 완료는 해당 순서 요소의 관찰일 뿐 무선 접속 전체 성공을 뜻하지 않습니다.
-- 실패·거부·오류·RST는 해당 패킷 이벤트가 관찰됐다는 뜻이며 책임 시스템이나 근본 원인을 확정하지 않습니다.
+- Failure·Reject·NAK·DNS 오류·RST는 해당 패킷 이벤트가 관찰됐다는 뜻이며 책임 시스템이나 근본 원인을 확정하지 않습니다.
 - TCP는 최종 ACK를 구분하지 않으므로 SYN·SYN/ACK가 있어도 3-Way Handshake 완료로 표시하지 않습니다.
 - 거래 미완료를 서버·방화벽·ClearPass 장애로 확정하지 않습니다.
 - 서로 다른 프로토콜 거래를 동일 단말의 한 접속으로 연결하지 않습니다.
@@ -65,31 +72,55 @@ Phase 4D는 타임라인의 로컬 별칭, 이벤트 종류, 프레임 번호와
 
 AI·외부 API·런타임 네트워크·텔레메트리·자동 업데이트·실시간 캡처·장비 접속은 없습니다.
 
-## 자원 제한과 실패-폐쇄 처리
+## Windows 일반 검증
 
-- 거래 별칭 최대 50,000개
-- 한 거래 시도 이벤트 최대 200,000개
-- 거래 시도별 근거 프레임 최대 64개
-- 허용 별칭: `EAP-N`, `RADIUS-N`, `DHCP-N`, `DNS-N`, `TCP-N`
-- 별칭과 이벤트 프로토콜이 다르면 거부
-- 프레임·상대 시간 순서 역전, 이벤트 전체·보관·생략 개수 불일치 거부
-- 상세 이벤트가 생략됐거나 캡처가 일부이면 `complete=false`
+병합 커밋을 Microsoft Windows Server 2025, CPython 3.13.15 x64에서 검증했습니다.
 
-## 자동 검증 범위
+- Python 바이트코드 컴파일 통과
+- 오프라인 소스 감사 49개 파일 통과
+- 저장소 감사 106개 Git 추적 파일 통과
+- 전체 단위 테스트 228개 실행, 227개 통과
+- Windows에서 열린 파일 교체가 불가능한 기존 플랫폼 테스트 1개만 명시적 건너뜀
+- Phase 4D 비대화형 자체 점검 통과
+- 런타임 의존성 선언 0개
+- 제품 네트워크 기능 없음 확인
 
-- EAP 완료와 RADIUS Reject의 거래 분리
-- 동일 DNS 별칭의 정상·오류 시도 분리
-- DHCP DORA 완료와 ACK만 관찰된 부분 거래 구분
-- TCP SYN/SYN-ACK를 완전한 3-Way Handshake로 과장하지 않는지 확인
-- TCP RST 뒤 새로운 SYN의 다음 시도 분리
-- 결정론적이며 식별정보 없는 직렬화
-- 일부 캡처와 이벤트 상세 생략 처리
-- 잘못된 별칭·프로토콜·프레임·시간·개수 거부
-- 기존 JSON 스키마 버전 2 하위 호환성
-- 최종 Portable EXE의 DNS 오류·TCP RST 실패 거래
-- 최종 Portable EXE의 EAP·RADIUS·DHCP·DNS 완료 거래
-- 최종 Portable EXE의 TCP SYN/SYN-ACK 성공 방향 거래와 완료 과장 방지
-- 결과 식별정보 비노출과 Portable 폴더 무변경
+## Portable 실제 패킷 검증
+
+최종 Portable ZIP을 압축 해제하고 다음 조건에서 `WlanTroubleshooterKO.exe`를 직접 실행했습니다.
+
+- `PYTHONPATH`와 `PYTHONHOME` 제거
+- `PATH`를 Windows 시스템 디렉터리로 제한
+- 외부 Python과 외부 Wireshark 사용 불가 상태
+- 내장 TShark 4.6.8 사용
+
+실제 합성 캡처 검증 결과:
+
+- DNS NXDOMAIN: `DNS-1-A1 / failure-observed`
+- TCP SYN → RST: `TCP-1-A1 / failure-observed`
+- PPP EAP Request → Response → Success: `complete`
+- RADIUS Access-Request → Access-Accept: `complete`
+- DHCP Discover → Offer → Request → ACK: `complete`
+- DNS Query → 정상 Response: `complete`
+- TCP SYN → SYN/ACK: `success-observed`, `complete`로 과장하지 않음
+- 별도 TCP RST: `failure-observed`
+- 모든 거래의 `root_cause_confirmed=false` 확인
+- 모든 거래의 `device_session_confirmed=false` 확인
+- 결과 JSON에 캡처 경로·파일명·IP·MAC·DNS 질의명·원본 거래 ID·Stream 번호·절대 epoch가 없음
+- 분석 전후 Portable 배포 폴더 파일 목록 동일
+
+## `v0.7.0-alpha.1` 릴리즈
+
+프리릴리즈는 병합 커밋 `15d0ba1a26d4d1407db35f98527539562f850dab`을 대상으로 게시됐습니다.
+
+- Portable 자산: `WlanTroubleshooterKO-v0.7.0-alpha.1-win64-portable.zip`
+- ZIP 크기: 98,440,392바이트
+- ZIP SHA-256: `eee53dd56dc660456c4a2763e9c709855b4c52c930f0e8f7b5e191bb9b72d846`
+- ZIP 검증 자산: `WlanTroubleshooterKO-v0.7.0-alpha.1-win64-portable.zip.sha256`
+- 대응 소스: `wireshark-4.6.8.tar.xz`
+- 공급망 기록: `supply-chain-observed.json`
+- 릴리즈 성격: 설치가 필요 없는 Win64 Portable 비식별 거래 시도 프리뷰
+- 애플리케이션 EXE 상용 코드 서명 인증서: 없음
 
 ## 고정 공급망
 
@@ -115,4 +146,4 @@ AI·외부 API·런타임 네트워크·텔레메트리·자동 업데이트·�
 - 네트워크 어댑터 비활성·Windows 방화벽 아웃바운드 차단 상태의 별도 사내 PC 검증
 - 상용 코드 서명 인증서를 이용한 애플리케이션 EXE 서명
 
-현재 브랜치는 **비식별 프로토콜 거래 시도 프리뷰**이며 완성형 단말별 WLAN 근본 원인 분석기로 표현하지 않습니다. 실제 사내 데이터와 캡처는 공개 저장소에 추가하지 않습니다.
+현재 릴리즈는 **비식별 프로토콜 거래 시도 프리뷰**이며 완성형 단말별 WLAN 근본 원인 분석기로 표현하지 않습니다. 실제 사내 데이터와 캡처는 공개 저장소에 추가하지 않습니다.
