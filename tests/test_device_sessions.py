@@ -1,6 +1,9 @@
+import hashlib
+import hmac
 import json
 import unittest
 from dataclasses import dataclass
+from unittest import mock
 
 from wlan_troubleshooter_ko.analysis.device_sessions import (
     DeviceSessionError,
@@ -116,6 +119,77 @@ class DeviceSessionTests(unittest.TestCase):
         self.assertNotIn(client, rendered)
         self.assertNotIn(server, rendered)
         self.assertNotIn("020000000010", rendered)
+
+    @mock.patch(
+        "wlan_troubleshooter_ko.analysis.device_sessions.os.urandom",
+        side_effect=(b"a" * 32, b"b" * 32),
+    )
+    def test_each_analysis_uses_new_secret_and_never_serializes_hmac(self, urandom):
+        client = "02:00:00:00:00:10"
+        text = self.output(
+            [
+                self.row(
+                    1,
+                    "eth:ip:udp:dhcp",
+                    dhcp_message_type=1,
+                    eth_source=client,
+                    eth_destination="ff:ff:ff:ff:ff:ff",
+                )
+            ]
+        )
+        transactions = FakeTransactions(())
+
+        first = build_device_sessions(
+            text,
+            self.profile(),
+            transactions,
+            expected_frames=1,
+        )
+        second = build_device_sessions(
+            text,
+            self.profile(),
+            transactions,
+            expected_frames=1,
+        )
+
+        self.assertEqual(urandom.call_args_list, [mock.call(32), mock.call(32)])
+        self.assertEqual(first.devices[0].alias, "DEVICE-1")
+        self.assertEqual(second.devices[0].alias, "DEVICE-1")
+        self.assertFalse(first.aliases_stable_across_runs)
+        self.assertFalse(second.aliases_stable_across_runs)
+
+        raw = bytes.fromhex("020000000010")
+        first_digest = hmac.new(
+            b"a" * 32,
+            b"device\x00" + raw,
+            hashlib.sha256,
+        ).hexdigest()
+        second_digest = hmac.new(
+            b"b" * 32,
+            b"device\x00" + raw,
+            hashlib.sha256,
+        ).hexdigest()
+        rendered = json.dumps(
+            {"first": first.to_dict(), "second": second.to_dict()},
+            ensure_ascii=False,
+        )
+        self.assertNotIn(first_digest, rendered)
+        self.assertNotIn(second_digest, rendered)
+        self.assertNotIn(client, rendered)
+
+    @mock.patch(
+        "wlan_troubleshooter_ko.analysis.device_sessions.os.urandom",
+        return_value=b"short",
+    )
+    def test_invalid_analysis_secret_length_fails_closed(self, urandom):
+        with self.assertRaises(DeviceSessionError):
+            build_device_sessions(
+                self.output([]),
+                self.profile(),
+                FakeTransactions(()),
+                expected_frames=0,
+            )
+        urandom.assert_called_once_with(32)
 
     def test_wireless_station_and_ap_are_separate_aliases(self):
         station = "02:00:00:00:00:a1"
