@@ -1,7 +1,7 @@
 """캡처 사전 점검의 불변 결과 모델."""
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 
 class CaptureStructureError(ValueError):
@@ -33,6 +33,48 @@ class InterfaceSummary:
 
 
 @dataclass(frozen=True)
+class InterfaceStatisticsObservation:
+    """하나의 PCAPNG Interface Statistics Block 관찰 결과."""
+
+    interface_alias: str
+    section_index: int
+    interface_id: int
+    observation_index: int
+    counter_state: str
+    ifrecv: Optional[int]
+    ifdrop: Optional[int]
+    filteraccept: Optional[int]
+    osdrop: Optional[int]
+    usrdeliv: Optional[int]
+    block_timestamp_present: bool
+    start_time_present: bool
+    end_time_present: bool
+    absolute_timestamps_serialized: bool = False
+    capture_loss_excluded: bool = False
+    root_cause_confirmed: bool = False
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "interface_alias": self.interface_alias,
+            "section_index": self.section_index,
+            "interface_id": self.interface_id,
+            "observation_index": self.observation_index,
+            "counter_state": self.counter_state,
+            "ifrecv": self.ifrecv,
+            "ifdrop": self.ifdrop,
+            "filteraccept": self.filteraccept,
+            "osdrop": self.osdrop,
+            "usrdeliv": self.usrdeliv,
+            "block_timestamp_present": self.block_timestamp_present,
+            "start_time_present": self.start_time_present,
+            "end_time_present": self.end_time_present,
+            "absolute_timestamps_serialized": self.absolute_timestamps_serialized,
+            "capture_loss_excluded": self.capture_loss_excluded,
+            "root_cause_confirmed": self.root_cause_confirmed,
+        }
+
+
+@dataclass(frozen=True)
 class CaptureStructure:
     capture_format: str
     byte_order: str
@@ -44,6 +86,8 @@ class CaptureStructure:
     truncated_packets_observed: int
     scan_complete: bool
     warnings: Tuple[str, ...]
+    interface_statistics_state: str = "no-interface-statistics"
+    interface_statistics: Tuple[InterfaceStatisticsObservation, ...] = ()
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -57,6 +101,10 @@ class CaptureStructure:
             "truncated_packets_observed": self.truncated_packets_observed,
             "scan_complete": self.scan_complete,
             "warnings": list(self.warnings),
+            "interface_statistics_state": self.interface_statistics_state,
+            "interface_statistics": [
+                item.to_dict() for item in self.interface_statistics
+            ],
         }
 
 
