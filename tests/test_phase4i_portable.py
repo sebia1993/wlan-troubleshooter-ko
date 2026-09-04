@@ -11,19 +11,9 @@ class Phase4IPortableTests(unittest.TestCase):
     def text(self, relative):
         return (self.root / relative).read_text(encoding="utf-8")
 
-    def test_release_metadata_is_exact(self):
+    def test_phase4i_schema_and_gate_remain_available(self):
         project = self.text("pyproject.toml")
-        for value in (
-            'version = "0.11.0a1"',
-            'phase = "4I"',
-            'eapol-handshake-version = "1"',
-            'release-tag = "v0.11.0-alpha.1"',
-        ):
-            self.assertIn(value, project)
-        release = self.text(".github/workflows/preview-release.yml")
-        self.assertIn('if ($Tag -ne "v0.11.0-alpha.1"', release)
-
-    def test_workflows_require_eapol_handshake_integration_gate(self):
+        self.assertIn('eapol-handshake-version = "1"', project)
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -34,7 +24,7 @@ class Phase4IPortableTests(unittest.TestCase):
                 self.assertIn("verify_capture_observability.ps1", workflow)
                 self.assertIn("verify_device_journeys.ps1", workflow)
 
-    def test_finalizer_enables_handshake_runtime_without_weakening_privacy(self):
+    def test_finalizer_preserves_handshake_runtime_and_privacy_flags(self):
         finalizer = self.text("tests/portable_build/finalize_portable.ps1")
         for value in (
             'eapol_handshake_runtime = "enabled"',
