@@ -1,49 +1,51 @@
 # 변경 기록
 
-## 0.9.0-alpha.1 — 2026-09-04
+## 0.10.0-alpha.1 — 2026-09-04
 
 ### 추가
 
-- Phase 4E `DEVICE-N` 가명과 Phase 4D 거래 시도를 결합하는 단말별 관찰 여정
-- EAP·RADIUS·DHCP·DNS·TCP 단계별 거래 상태 집계
-- 실제 근거 프레임 순서에 따른 관찰 단계 순서
-- 첫 실패 관찰 단계와 마지막 성공 방향 단계
-- 단계별 연결 거래 ID, 근거 프레임과 Wireshark `frame.number` 필터
-- `progress-observed`, `failure-observed`, `mixed`, `partial-progress`, `incomplete`, `no-linked-transactions` 여정 상태
-- GUI `[8. 단말 가명별 관찰 여정]` 영역
-- 최종 Portable EXE의 `DEVICE-1` EAP·DHCP·DNS·TCP 여정 실분석 게이트
+- 캡처 구조·이벤트 타임라인·거래 보고서 완전성 교차 검증
+- EAP·RADIUS·DHCP·DNS·TCP 요청·응답 계열 이벤트 관찰 범위
+- 미완료 거래의 `response-not-observed`, `capture-boundary-risk`, `packet-truncation-risk`, `insufficient-analysis-input` 평가
+- 첫·마지막 프레임 경계 위험
+- 잘린 패킷, 상세 이벤트 생략과 거래 근거 생략 위험
+- GUI `[9. 캡처 관찰 가능성과 미응답 해석]`
+- 기존 최상위 JSON 스키마 2를 유지하는 `capture_observability` 결과
+- 런타임 생성 미응답 DNS PCAP의 Portable 실제 분석 게이트
 
-### 개인정보·상관 안전성
+### 오탐 방지
 
-- 원본 L2·L3 주소, SSID, 사용자명, DNS 질의명, 포트와 거래 ID를 여정 입력에서 제외
-- 단말 가명 보고서의 원문 직렬화·키 저장·실행 간 별칭 고정 플래그가 모두 `false`인지 확인
-- 연결 객체의 근거 프레임과 원 거래 근거가 정확히 일치하지 않으면 실패-폐쇄 처리
-- 근거가 생략된 거래를 단말 여정에 연결하지 않음
-- 생략 거래가 미연결·빈 근거로 정제된 경우에만 여정에서 안전하게 제외
-- RADIUS처럼 단말 L2 근거가 없는 거래를 시간 근접성만으로 연결하지 않음
-- `device_identity_confirmed=false`
-- `cross_protocol_session_confirmed=false`
-- `root_cause_confirmed=false`
-- 첫 실패 관찰 단계를 근본 원인 위치로 표현하지 않음
+- `capture_start_proven=false`
+- `capture_end_proven=false`
+- `capture_loss_excluded=false`
+- `directionality_proven=false`
+- `absence_can_confirm_failure=false`
+- 개별 미완료 거래 `absence_is_failure=false`
+- 파일 전체 처리와 양방향·무손실·장애 구간 전체 포함을 구분
+- 요청·응답 계열 이벤트가 모두 보여도 모든 방향의 완전 수집으로 확정하지 않음
+- 응답 미관찰을 서버·방화벽·ClearPass·DHCP·DNS 장애로 확정하지 않음
 
-### 판정 보완
+### Portable 검증
 
-- 동일 단계의 성공 방향과 실패 결과를 `mixed`로 유지
-- 혼재 단계도 성공 방향이 실제 관찰된 경우 마지막 성공 방향 단계에 반영
-- 캡처 일부·거래 미할당·모호 연결이 있으면 전체 완료로 과장하지 않음
-
-### Windows 격리 보완 포함
-
-- TShark 임시파일 사용으로 바뀌는 Windows Archive·시간·디렉터리 크기를 객체 교체로 오인하지 않음
-- 장치 ID·파일 ID·객체 종류·링크 수·Reparse Point 보안 검사는 유지
-- 실행 후 격리 경로 무잔류 검사는 유지
+- 중간 DNS Query 미응답을 `response-not-observed`로 분류
+- 마지막 프레임 DNS Query 미응답을 `capture-boundary-risk`로 분류
+- 원본 IP·MAC·DNS 질의명·거래 ID·절대 시간·경로 비노출
+- 분석 전후 Portable 배포 폴더 무변경
 
 ### 제한
 
-- 여정은 동일 사용자 신원이나 하나의 완전한 교차 프로토콜 세션을 확정하지 않음
-- 캡처 누락과 실제 미응답 자동 구분은 아직 지원하지 않음
-- 동일 단말 4-Way Handshake·로밍·RF 근본 원인 분석은 아직 지원하지 않음
-- 최종 오프라인 HTML 보고서와 상용 코드 서명은 아직 지원하지 않음
+- 캡처 프로그램·SPAN·무선 드라이버의 실제 드롭 카운터 수집은 아직 지원하지 않음
+- 캡처 시작·종료가 장애 구간을 포함했는지 자동 증명하지 않음
+- 응답 미관찰을 실제 미응답으로 확정하지 않음
+- EAPOL 4-Way Handshake·로밍·RF·HTML 보고서는 아직 지원하지 않음
+
+## 0.9.0-alpha.1 — 2026-09-04
+
+- 분석 실행별 `DEVICE-N`에 안전하게 연결된 거래의 단말 관찰 여정
+- 실제 근거 프레임 순서, 첫 실패 관찰 단계와 마지막 성공 방향 단계
+- 단계별 성공·실패·혼재·미완료 상태와 Wireshark 필터
+- 근거 없는 RADIUS 시간 추정 연결 금지
+- `device_identity_confirmed=false`, `cross_protocol_session_confirmed=false`, `root_cause_confirmed=false`
 
 ## 0.8.0-alpha.1 — 2026-09-04
 
