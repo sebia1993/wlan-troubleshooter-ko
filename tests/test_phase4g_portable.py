@@ -11,19 +11,11 @@ class Phase4GPortableTests(unittest.TestCase):
     def text(self, relative):
         return (self.root / relative).read_text(encoding="utf-8")
 
-    def test_phase4g_release_metadata_is_exact(self):
+    def test_capture_observability_schema_version_remains_available(self):
         project = self.text("pyproject.toml")
-        for value in (
-            'version = "0.10.0a1"',
-            'phase = "4G"',
-            'capture-observability-version = "1"',
-            'release-tag = "v0.10.0-alpha.1"',
-        ):
-            self.assertIn(value, project)
-        release = self.text(".github/workflows/preview-release.yml")
-        self.assertIn('if ($Tag -ne "v0.10.0-alpha.1"', release)
+        self.assertIn('capture-observability-version = "1"', project)
 
-    def test_workflows_require_observability_integration_gate(self):
+    def test_workflows_preserve_observability_integration_gate(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -34,7 +26,7 @@ class Phase4GPortableTests(unittest.TestCase):
                     self.text(relative),
                 )
 
-    def test_finalizer_enables_observability_without_weakening_privacy(self):
+    def test_finalizer_preserves_observability_without_weakening_privacy(self):
         finalizer = self.text("tests/portable_build/finalize_portable.ps1")
         for value in (
             'capture_observability_runtime = "enabled"',

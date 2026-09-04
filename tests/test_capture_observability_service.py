@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from wlan_troubleshooter_ko.analysis.device_sessions import DeviceSessionReport
 from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
     CaptureStructure,
@@ -17,16 +18,20 @@ from wlan_troubleshooter_ko.core.capture import CaptureInfo
 
 
 class FakeRun:
-    def __init__(self, timeline, transactions):
+    def __init__(self, timeline, transactions, devices):
         self.event_timeline = timeline
         self.transaction_sessions = transactions
+        self.device_sessions = devices
 
     def to_dict(self):
         return {
-            "event_timeline": {
-                "frames_observed": self.event_timeline.frames_observed,
-            },
+            "event_timeline": (
+                None
+                if self.event_timeline is None
+                else {"frames_observed": self.event_timeline.frames_observed}
+            ),
             "transaction_sessions": self.transaction_sessions.to_dict(),
+            "device_sessions": self.device_sessions.to_dict(),
         }
 
 
@@ -81,13 +86,44 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             cautions=(),
         )
 
+    def empty_devices(self):
+        return DeviceSessionReport(
+            profile_id="device-identities",
+            profile_version="0.5.0",
+            frames_observed=2,
+            expected_frames=2,
+            complete=True,
+            devices=(),
+            attempt_links=(),
+            frames_unassigned=2,
+            frames_ambiguous=0,
+            attempts_unassigned=0,
+            attempts_ambiguous=0,
+            missing_optional_fields=(),
+            raw_identifiers_serialized=False,
+            alias_secret_persisted=False,
+            aliases_stable_across_runs=False,
+            cautions=(),
+        )
+
+    def empty_timeline(self):
+        return SimpleNamespace(
+            frames_observed=2,
+            complete=True,
+            events_total=0,
+            events_retained=0,
+            events_omitted=0,
+            events=(),
+            missing_optional_fields=(),
+        )
+
     @mock.patch("wlan_troubleshooter_ko.analysis.service.run_connection_analysis")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.load_ruleset")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_bundle")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.classify_capture_capabilities")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_capture_structure")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.validate_capture")
-    def test_completed_service_serializes_observability_without_paths(
+    def test_completed_service_serializes_observability_and_eapol_boundary_without_paths(
         self,
         validate_capture_mock,
         inspect_structure_mock,
@@ -107,13 +143,6 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
                 sha256="a" * 64,
             )
             structure = self.structure()
-            timeline = SimpleNamespace(
-                frames_observed=2,
-                complete=True,
-                events_total=0,
-                events_retained=0,
-                events_omitted=0,
-            )
             transactions = self.empty_transactions()
 
             validate_capture_mock.return_value = capture
@@ -121,7 +150,11 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             classify_mock.return_value = self.capabilities()
             bundle_mock.return_value = SimpleNamespace(code="integrity_verified")
             rules_mock.return_value = {"ruleset_version": "test", "rules": []}
-            run_mock.return_value = FakeRun(timeline, transactions)
+            run_mock.return_value = FakeRun(
+                self.empty_timeline(),
+                transactions,
+                self.empty_devices(),
+            )
 
             result = analyze_capture(
                 capture_path,
@@ -134,6 +167,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
 
         self.assertEqual(result.inventory_state, "completed")
         self.assertIsNotNone(result.capture_observability)
+        self.assertIsNotNone(result.eapol_handshakes)
         observability = serialized["capture_observability"]
         self.assertEqual(observability["schema_version"], 1)
         self.assertTrue(observability["analysis_input_complete"])
@@ -142,6 +176,12 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertFalse(observability["capture_loss_excluded"])
         self.assertFalse(observability["directionality_proven"])
         self.assertFalse(observability["absence_can_confirm_failure"])
+        handshakes = serialized["eapol_handshakes"]
+        self.assertEqual(handshakes["schema_version"], 1)
+        self.assertEqual(handshakes["source_key_events_total"], 0)
+        self.assertFalse(handshakes["same_handshake_confirmed"])
+        self.assertFalse(handshakes["key_installation_confirmed"])
+        self.assertFalse(handshakes["cryptographic_success_confirmed"])
         self.assertNotIn(str(capture_path), str(serialized))
         self.assertNotIn(capture_path.name, str(serialized))
         run_mock.assert_called_once()
@@ -175,7 +215,11 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             classify_mock.return_value = self.capabilities()
             bundle_mock.return_value = SimpleNamespace(code="integrity_verified")
             rules_mock.return_value = {"ruleset_version": "test", "rules": []}
-            run_mock.return_value = FakeRun(None, self.empty_transactions())
+            run_mock.return_value = FakeRun(
+                None,
+                self.empty_transactions(),
+                self.empty_devices(),
+            )
 
             result = analyze_capture(
                 capture.path,
@@ -188,7 +232,8 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(result.inventory_state, "failed")
         self.assertIsNone(result.protocol_inventory)
         self.assertIsNone(result.capture_observability)
-        self.assertIn("이벤트·거래 결과", result.inventory_message)
+        self.assertIsNone(result.eapol_handshakes)
+        self.assertIn("후속 분석", result.inventory_message)
 
 
 if __name__ == "__main__":

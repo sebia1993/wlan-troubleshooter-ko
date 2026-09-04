@@ -17,7 +17,7 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "4G")
+        self.assertEqual(result["phase"], "4I")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["ruleset_version"], "0.2.0")
@@ -30,13 +30,17 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["device_session_schema_version"], "1")
         self.assertEqual(result["device_journey_schema_version"], "1")
         self.assertEqual(result["capture_observability_schema_version"], "1")
+        self.assertEqual(result["eapol_handshake_schema_version"], "1")
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
         self.assertIn("캡처 관찰 가능성", result["analysis_features"])
+        self.assertIn("EAPOL-Key M1~M4", result["analysis_features"])
         self.assertIn("HMAC 키 미저장", result["identity_privacy"])
         self.assertIn("교차 프로토콜 세션 미확정", result["identity_privacy"])
         self.assertIn("응답 미관찰만으로 실패 확정 금지", result["absence_boundary"])
+        self.assertIn("Replay Counter", result["eapol_handshake_boundary"])
+        self.assertIn("키 설치", result["eapol_handshake_boundary"])
 
     def test_self_check_can_write_new_local_json_for_windowed_exe(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -46,11 +50,12 @@ class AppSmokeTests(unittest.TestCase):
             value = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(value["network_features"], "없음")
             self.assertEqual(value["python_external_required"], "true")
-            self.assertEqual(value["phase"], "4G")
+            self.assertEqual(value["phase"], "4I")
             self.assertEqual(value["identity_field_count"], "13")
             self.assertEqual(value["device_session_schema_version"], "1")
             self.assertEqual(value["device_journey_schema_version"], "1")
             self.assertEqual(value["capture_observability_schema_version"], "1")
+            self.assertEqual(value["eapol_handshake_schema_version"], "1")
             with self.assertRaises(FileExistsError):
                 main(["--self-check-output=" + str(output)])
 
@@ -77,6 +82,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(value["schema_version"], 2)
             self.assertEqual(value["protocol_inventory_state"], "unavailable")
             self.assertIsNone(value["capture_observability"])
+            self.assertIsNone(value["eapol_handshakes"])
             self.assertNotIn(str(capture), rendered)
             self.assertNotIn(capture.name, rendered)
 
@@ -97,6 +103,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertTrue(state.valid)
             self.assertIn("캡처 유형 추정", state.detail)
             self.assertIn("관찰 가능성", state.detail)
+            self.assertIn("EAPOL 4-Way Handshake", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)

@@ -25,7 +25,7 @@ jobs:
     name: Validate, build, test, and publish Win64 Portable
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 130
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -69,7 +69,7 @@ jobs:
           if ($ProjectVersion -ne $ModuleVersion) {
               throw "Project and module versions do not match."
           }
-          if ($Tag -ne "v0.10.0-alpha.1" -or $Supply.wireshark.msi.sha256 -eq "DISCOVER") {
+          if ($Tag -ne "v0.11.0-alpha.1" -or $Supply.wireshark.msi.sha256 -eq "DISCOVER") {
               throw "Portable release supply-chain metadata is not pinned."
           }
           "tag=$Tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -96,6 +96,7 @@ jobs:
           ./tests/portable_build/verify_device_sessions.ps1 -PackageOutputPath $PackagePath -PythonPath python
           ./tests/portable_build/verify_device_journeys.ps1 -PackageOutputPath $PackagePath -PythonPath python
           ./tests/portable_build/verify_capture_observability.ps1 -PackageOutputPath $PackagePath -PythonPath python
+          ./tests/portable_build/verify_eapol_handshakes.ps1 -PackageOutputPath $PackagePath -PythonPath python
           $Package = Get-Content -LiteralPath $PackagePath -Raw | ConvertFrom-Json
           foreach ($Name in @("archive", "archive_checksum", "wireshark_source", "wireshark_source_checksum", "observed_supply_chain")) {
               $Value = [string]$Package.$Name
@@ -154,5 +155,5 @@ jobs:
           "- Tag: ${{ steps.metadata.outputs.tag }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           "- ZIP bytes: ${{ steps.package.outputs.archive_size_bytes }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
           ("- ZIP SHA-256: " + '${{ steps.package.outputs.archive_sha256 }}') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "- Portable Finding, transaction, and device journey integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "- Portable unanswered DNS and capture-boundary observability integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Portable Finding, transaction, device journey, and observability integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Portable EAPOL M1/M2/M3/repeated-M3/M4 conservative sequence integration: passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
