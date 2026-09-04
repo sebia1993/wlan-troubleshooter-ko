@@ -54,24 +54,38 @@ def _association_response(sequence: int) -> bytes:
     return header + body
 
 
-def _data_header(
-    destination: bytes,
-    source: bytes,
-    bssid: bytes,
-    sequence: int,
-) -> bytes:
-    frame_control = 2 << 2
+def _qos_data_header(from_access_point: bool, sequence: int) -> bytes:
+    """Build an infrastructure-mode QoS Data header used by real EAPOL traffic."""
+
+    qos_data = (8 << 4) | (2 << 2)
+    direction = 0x0200 if from_access_point else 0x0100
+    frame_control = qos_data | direction
+    if from_access_point:
+        destination, source = STATION, ACCESS_POINT
+    else:
+        destination, source = ACCESS_POINT, STATION
     return (
         struct.pack("<HH", frame_control, 0)
         + destination
         + source
-        + bssid
+        + ACCESS_POINT
         + struct.pack("<H", (sequence & 0xFFF) << 4)
+        + struct.pack("<H", 0)
     )
 
 
-def _eap_packet(code: int, identifier: int, eap_type: int | None = None) -> bytes:
-    body = b"" if eap_type is None else bytes((eap_type,))
+def _eap_packet(
+    code: int,
+    identifier: int,
+    eap_type: int | None = None,
+    data: bytes = b"",
+) -> bytes:
+    if eap_type is None:
+        if data:
+            raise ValueError("EAP Success and Failure cannot contain type data")
+        body = b""
+    else:
+        body = bytes((eap_type,)) + data
     return struct.pack("!BBH", code, identifier, 4 + len(body)) + body
 
 
@@ -81,13 +95,13 @@ def _eapol_data(
     identifier: int,
     sequence: int,
     eap_type: int | None,
+    data: bytes = b"",
 ) -> bytes:
-    source = ACCESS_POINT if request else STATION
-    destination = STATION if request else ACCESS_POINT
-    packet = _eap_packet(code, identifier, eap_type)
-    eapol = struct.pack("!BBH", 2, 0, len(packet)) + packet
+    packet = _eap_packet(code, identifier, eap_type, data)
+    version = 2 if request else 1
+    eapol = struct.pack("!BBH", version, 0, len(packet)) + packet
     llc_snap = bytes.fromhex("aaaa03000000888e")
-    return _data_header(destination, source, ACCESS_POINT, sequence) + llc_snap + eapol
+    return _qos_data_header(request, sequence) + llc_snap + eapol
 
 
 def _deauthentication(sequence: int) -> bytes:
@@ -101,7 +115,7 @@ def frames() -> Iterable[Tuple[int, bytes]]:
     yield 3, _association_request(3)
     yield 4, _association_response(4)
     yield 5, _eapol_data(True, 1, 5, 5, 1)
-    yield 6, _eapol_data(False, 2, 5, 6, 1)
+    yield 6, _eapol_data(False, 2, 5, 6, 1, b"synthetic-user")
     yield 7, _eapol_data(True, 3, 5, 7, None)
     yield 8, _deauthentication(8)
 
