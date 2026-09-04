@@ -80,6 +80,8 @@ class PortableSupplyChainTests(unittest.TestCase):
             "verify_device_sessions.ps1",
             "verify_device_journeys.ps1",
             "verify_capture_observability.ps1",
+            "verify_eapol_handshakes.ps1",
+            "verify_eapol_replay_relations.ps1",
         ):
             text = (self.support / filename).read_text(encoding="utf-8")
             parameter_block = text.split(")", 1)[0]
@@ -112,6 +114,10 @@ class PortableSupplyChainTests(unittest.TestCase):
             "device_session_runtime",
             "device_journey_runtime",
             "capture_observability_runtime",
+            "eapol_handshake_runtime",
+            "eapol_replay_relation_runtime",
+            "raw_replay_counter_serialization",
+            "replay_counter_persistence",
             "raw_identifier_serialization",
             "alias_secret_persistence",
             "cross_run_alias_stability",
@@ -126,6 +132,8 @@ class PortableSupplyChainTests(unittest.TestCase):
             "verify_device_sessions.ps1",
             "verify_device_journeys.ps1",
             "verify_capture_observability.ps1",
+            "verify_eapol_handshakes.ps1",
+            "verify_eapol_replay_relations.ps1",
         )
         for relative in (
             ".github/workflows/windows-portable.yml",
@@ -220,6 +228,7 @@ class PortableSupplyChainTests(unittest.TestCase):
         for value in (
             "device_journeys",
             "DEVICE-1",
+            '"eap"',
             '"dhcp"',
             '"dns"',
             '"tcp"',
@@ -250,6 +259,38 @@ class PortableSupplyChainTests(unittest.TestCase):
         ):
             self.assertIn(value, observability_verifier)
 
+        handshake_verifier = (
+            self.support / "verify_eapol_handshakes.ps1"
+        ).read_text(encoding="utf-8")
+        for value in (
+            "generate_eapol_handshake_fixture.py",
+            "eapol_handshake_runtime",
+            "EAPOL-HS-1",
+            "message-repetition-observed",
+            "same_handshake_confirmed",
+            "key_installation_confirmed",
+            "cryptographic_success_confirmed",
+        ):
+            self.assertIn(value, handshake_verifier)
+
+        replay_verifier = (
+            self.support / "verify_eapol_replay_relations.ps1"
+        ).read_text(encoding="utf-8")
+        for value in (
+            "generate_eapol_replay_fixture.py",
+            "eapol_replay_relations",
+            "expected-relations-observed",
+            "equal-observed",
+            "increased-observed",
+            "same-counter-observed",
+            "raw_replay_counters_serialized",
+            "replay_counter_values_persisted",
+            "same_handshake_confirmed",
+            "retransmission_confirmed",
+            "root_cause_confirmed",
+        ):
+            self.assertIn(value, replay_verifier)
+
     def test_event_fixtures_are_generated_at_runtime_not_committed(self):
         ethernet = (self.support / "generate_event_fixture.py").read_text(
             encoding="utf-8"
@@ -262,6 +303,12 @@ class PortableSupplyChainTests(unittest.TestCase):
         )
         observability = (
             self.support / "generate_observability_fixture.py"
+        ).read_text(encoding="utf-8")
+        handshake = (
+            self.support / "generate_eapol_handshake_fixture.py"
+        ).read_text(encoding="utf-8")
+        replay = (
+            self.support / "generate_eapol_replay_fixture.py"
         ).read_text(encoding="utf-8")
         for value in (
             "build_pcap",
@@ -293,6 +340,19 @@ class PortableSupplyChainTests(unittest.TestCase):
             "observability",
         ):
             self.assertIn(value, observability)
+        for value in (
+            "build_pcap",
+            "_key_descriptor",
+            "retry=True",
+        ):
+            self.assertIn(value, handshake)
+        for value in (
+            "FIRST_COUNTER",
+            "LATER_COUNTER",
+            "_eapol_key",
+            "build_pcap",
+        ):
+            self.assertIn(value, replay)
         self.assertFalse(any(self.root.rglob("*.pcap")))
         self.assertFalse(any(self.root.rglob("*.pcapng")))
 
