@@ -53,10 +53,10 @@ def self_check() -> Dict[str, str]:
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
         analysis_execution = (
-            "활성 · Finding·거래 시도·분석 실행별 DEVICE-N/AP-N 가명"
+            "활성 · Finding·거래 시도·DEVICE-N/AP-N 가명·단말별 관찰 여정"
         )
     return {
-        "phase": "4E",
+        "phase": "4F",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "rule_count": str(len(rules["rules"])),
@@ -68,6 +68,7 @@ def self_check() -> Dict[str, str]:
         "identity_field_count": str(len(identity_profile.fields)),
         "transaction_session_schema_version": "1",
         "device_session_schema_version": "1",
+        "device_journey_schema_version": "1",
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
         "python_external_required": "true" if _external_python_required() else "false",
@@ -76,10 +77,12 @@ def self_check() -> Dict[str, str]:
         "protocol_inventory_execution": analysis_execution,
         "analysis_features": (
             "캡처 구조 점검 + 프로토콜 인벤토리 + 접속 단계 Finding + "
-            "비식별 이벤트 타임라인 + 거래 시도 + 분석 실행별 단말·AP 가명"
+            "비식별 이벤트 타임라인 + 거래 시도 + 분석 실행별 단말·AP 가명 + "
+            "단말 가명별 관찰 여정"
         ),
         "identity_privacy": (
-            "원문 L2 주소 미직렬화 · HMAC 키 미저장 · 실행 간 별칭 비고정"
+            "원문 L2 주소 미직렬화 · HMAC 키 미저장 · 실행 간 별칭 비고정 · "
+            "교차 프로토콜 세션 미확정"
         ),
         "network_features": "없음",
     }
