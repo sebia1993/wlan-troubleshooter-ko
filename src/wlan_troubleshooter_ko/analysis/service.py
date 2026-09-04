@@ -207,6 +207,7 @@ def analyze_capture(
                 ruleset,
                 expected_frames=expected_frames,
                 has_80211_link_type=capabilities.has_80211_link_type,
+                expected_capture=capture,
                 timeout_seconds=timeout_seconds,
                 cancel_event=cancel_event,
             )

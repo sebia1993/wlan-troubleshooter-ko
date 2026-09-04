@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Tuple
 
@@ -61,6 +61,7 @@ class _TSharkTextResult:
     bundle_version: str
     manifest_sha256: str
     text: str
+    capture: Optional[CaptureInfo] = None
 
 
 def _same_capture(first: CaptureInfo, second: CaptureInfo) -> bool:
@@ -104,8 +105,17 @@ def run_profile_fields_text(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
     max_stdout_bytes: int = 64 * 1024 * 1024,
+    expected_capture: Optional[CaptureInfo] = None,
 ) -> _TSharkTextResult:
+    """고정 프로파일을 실행하고 동일 캡처 지문을 실행 전후 보장한다."""
+
     initial_capture = validate_capture(capture_path, cancel_event=cancel_event)
+    if expected_capture is not None and not _same_capture(
+        expected_capture,
+        initial_capture,
+    ):
+        raise TSharkExecutionError("캡처 파일이 분석 단계 사이에 변경됐습니다.")
+
     before = verify_bundle(vendor_root)
     text = probe_bundle_runtime(
         vendor_root,
@@ -120,10 +130,21 @@ def run_profile_fields_text(
     after = verify_bundle(vendor_root)
     if after != before:
         raise TSharkExecutionError("TShark 번들이 프로토콜 검사 중 변경됐습니다.")
+
     final_capture = validate_capture(capture_path, cancel_event=cancel_event)
     if not _same_capture(initial_capture, final_capture):
         raise TSharkExecutionError("캡처 파일이 프로토콜 검사 중 변경됐습니다.")
-    return _TSharkTextResult(after.version, after.manifest_sha256, text)
+    if expected_capture is not None and not _same_capture(
+        expected_capture,
+        final_capture,
+    ):
+        raise TSharkExecutionError("캡처 파일이 분석 단계 사이에 변경됐습니다.")
+    return _TSharkTextResult(
+        after.version,
+        after.manifest_sha256,
+        text,
+        final_capture,
+    )
 
 
 @dataclass(frozen=True)
@@ -290,6 +311,42 @@ def _same_verified_runtime(
     )
 
 
+def _same_verified_capture(
+    first: _TSharkTextResult,
+    second: _TSharkTextResult,
+) -> bool:
+    return (
+        first.capture is not None
+        and second.capture is not None
+        and _same_capture(first.capture, second.capture)
+    )
+
+
+def _prepare_device_link_transactions(
+    report: TransactionSessionReport,
+) -> Tuple[TransactionSessionReport, int]:
+    """생략된 근거가 있는 거래는 단말 연결 입력에서 근거를 제거한다."""
+
+    attempts = []
+    incomplete_evidence = 0
+    for attempt in report.attempts:
+        omitted = attempt.evidence_frames_omitted
+        if type(omitted) is not int or omitted < 0:
+            raise TSharkExecutionError("거래 시도 근거 생략 수가 올바르지 않습니다.")
+        if omitted:
+            incomplete_evidence += 1
+            attempts.append(
+                replace(
+                    attempt,
+                    evidence_frames=(),
+                    display_filter="",
+                )
+            )
+        else:
+            attempts.append(attempt)
+    return replace(report, attempts=tuple(attempts)), incomplete_evidence
+
+
 def run_protocol_inventory(
     vendor_root: Path,
     capture_path: Path,
@@ -354,6 +411,7 @@ def run_connection_analysis(
     *,
     expected_frames: Optional[int],
     has_80211_link_type: bool,
+    expected_capture: Optional[CaptureInfo] = None,
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> ProtocolInventoryRun:
@@ -383,6 +441,7 @@ def run_connection_analysis(
         resolved_profile,
         timeout_seconds=timeout_seconds,
         cancel_event=cancel_event,
+        expected_capture=expected_capture,
     )
     if not _same_verified_runtime(catalog_result, fields_result):
         raise TSharkExecutionError(
@@ -408,6 +467,9 @@ def run_connection_analysis(
         expected_frames=expected_frames,
     )
     transaction_sessions = build_transaction_sessions(timeline)
+    link_transactions, incomplete_attempt_evidence = (
+        _prepare_device_link_transactions(transaction_sessions)
+    )
 
     identity_result = run_profile_fields_text(
         vendor_root,
@@ -416,21 +478,37 @@ def run_connection_analysis(
         identity_profile,
         timeout_seconds=timeout_seconds,
         cancel_event=cancel_event,
+        expected_capture=expected_capture,
     )
     if not _same_verified_runtime(fields_result, identity_result):
         raise TSharkExecutionError(
             "TShark 번들이 접속 단계 검사와 단말 가명화 검사 사이에 변경됐습니다."
         )
+    if not _same_verified_capture(fields_result, identity_result):
+        raise TSharkExecutionError(
+            "접속 단계 분석과 단말 가명화 분석의 캡처 지문이 다릅니다."
+        )
+
     device_sessions = build_device_sessions(
         identity_result.text,
         identity_profile,
-        transaction_sessions,
+        link_transactions,
         expected_frames=expected_frames,
     )
+    if incomplete_attempt_evidence:
+        device_sessions = replace(
+            device_sessions,
+            complete=False,
+            cautions=(
+                "근거 프레임이 일부 생략된 거래 시도는 단말에 연결하지 않았습니다.",
+                *device_sessions.cautions,
+            ),
+        )
 
     # Raw L2 identifiers exist only in the transient identity output. The
     # returned dataclasses contain aliases and packet evidence only.
     del identity_result
+    del link_transactions
 
     return ProtocolInventoryRun(
         bundle_version=fields_result.bundle_version,
