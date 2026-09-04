@@ -23,8 +23,37 @@ function Restore-EnvironmentValue {
     }
 }
 
+function Write-SafeFailureSummary {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$Output
+    )
+
+    if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) {
+        Write-Host "$Label analysis state: result file was not created"
+        return
+    }
+    try {
+        $Failure = Get-Content -LiteralPath $Output -Raw | ConvertFrom-Json -Depth 128
+        $State = [string]$Failure.protocol_inventory_state
+        $Message = [string]$Failure.protocol_inventory_message
+        if ($State -notin @("completed", "unavailable", "failed")) {
+            $State = "invalid-result"
+        }
+        if ($Message.Length -gt 500) {
+            $Message = $Message.Substring(0, 500)
+        }
+        Write-Host "$Label analysis state: $State"
+        Write-Host "$Label analysis message: $Message"
+    }
+    catch {
+        Write-Host "$Label analysis state: unreadable-result"
+    }
+}
+
 function Invoke-PortableAnalysis {
     param(
+        [Parameter(Mandatory = $true)][string]$Label,
         [Parameter(Mandatory = $true)][string]$Application,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string]$Capture,
@@ -37,12 +66,14 @@ function Invoke-PortableAnalysis {
     )
     $Process = Start-Process -FilePath $Application -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -Wait -PassThru
     if ($Process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $Output -PathType Leaf)) {
+        Write-SafeFailureSummary -Label $Label -Output $Output
         throw "Portable device-alias analysis failed."
     }
 
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 128
     if ($Result.schema_version -ne 2 -or $Result.protocol_inventory_state -ne "completed") {
+        Write-SafeFailureSummary -Label $Label -Output $Output
         throw "Portable device-alias analysis did not complete with schema version 2."
     }
     if ($null -eq $Result.protocol_inventory.device_sessions) {
@@ -151,8 +182,8 @@ try {
         $env:PATH = (Join-Path $env:SystemRoot "System32") + ";" + $env:SystemRoot
         $Application = Join-Path $Expanded "WlanTroubleshooterKO.exe"
 
-        $Ethernet = Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $EthernetCapture -Output $EthernetOutput
-        $Wireless = Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $WirelessCapture -Output $WirelessOutput
+        $Ethernet = Invoke-PortableAnalysis -Label "Ethernet" -Application $Application -WorkingDirectory $Expanded -Capture $EthernetCapture -Output $EthernetOutput
+        $Wireless = Invoke-PortableAnalysis -Label "Wireless" -Application $Application -WorkingDirectory $Expanded -Capture $WirelessCapture -Output $WirelessOutput
     }
     finally {
         $env:PATH = $OldPath
