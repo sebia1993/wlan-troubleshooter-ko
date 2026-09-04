@@ -1,21 +1,21 @@
 # wlan-troubleshooter-ko
 
-Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 분석하여, 초급 네트워크 엔지니어에게 **캡처 품질, 접속 단계, 명시적 실패, 비식별 거래, 분석 실행별 단말·AP 가명과 단말별 관찰 여정**을 한국어로 안내하는 도구입니다.
+Windows 11에서 PCAP·PCAPNG를 외부로 전송하지 않고 로컬에서 분석하여, 초급 네트워크 엔지니어에게 **캡처 품질, 접속 단계, 명시적 실패, 비식별 거래, 분석 실행별 단말·AP 가명, 단말별 관찰 여정과 미응답 해석 경계**를 한국어로 안내하는 도구입니다.
 
 AI·LLM·Ollama·외부 API·인터넷 조회·텔레메트리·자동 업데이트를 사용하지 않습니다.
 
 ## 가장 쉬운 실행 방법
 
-`v0.9.0-alpha.1` 릴리스에서 다음 파일을 받습니다.
+`v0.10.0-alpha.1` 릴리스에서 다음 파일을 받습니다.
 
 ```text
-WlanTroubleshooterKO-v0.9.0-alpha.1-win64-portable.zip
+WlanTroubleshooterKO-v0.10.0-alpha.1-win64-portable.zip
 ```
 
 1. ZIP을 로컬 폴더에 완전히 압축 해제합니다.
 2. `WlanTroubleshooterKO.exe`를 실행합니다.
 3. `PCAP 또는 PCAPNG 파일 선택`을 누릅니다.
-4. 사전 점검부터 `DEVICE-N`별 관찰 여정까지 확인합니다.
+4. 사전 점검부터 캡처 관찰 가능성과 미응답 해석까지 확인합니다.
 
 ZIP 내부에서 EXE를 바로 실행하지 않습니다. Python, Wireshark, Node.js, 관리자 권한과 인터넷 연결은 필요하지 않습니다.
 
@@ -125,25 +125,16 @@ AP-2
 
 ### 8. 단말 가명별 접속 관찰 여정
 
-Phase 4F는 `DEVICE-N`에 이미 안전하게 연결된 거래만 모아 실제 근거 프레임 순서로 관찰 여정을 만듭니다.
+`DEVICE-N`에 이미 안전하게 연결된 거래만 모아 실제 근거 프레임 순서로 관찰 여정을 만듭니다.
 
 ```text
 DEVICE-1
-관찰 단계: EAP → DHCP → DNS → TCP
+관찰 단계: DHCP → DNS → TCP
 첫 실패 관찰 단계: TCP
 마지막 성공 방향 단계: TCP
 ```
 
-각 여정은 다음 정보를 제공합니다.
-
-- 연결된 거래 시도 ID
-- 실제 프레임 순서 기준 관찰 단계
-- 단계별 완료·성공 방향·실패·혼재·미완료 상태
-- 첫 실패 관찰 단계
-- 마지막 성공 방향 단계
-- AP 가명
-- 근거 프레임과 Wireshark 필터
-- 단말에 연결하지 못한 거래와 모호한 거래 수
+각 여정은 연결 거래, 단계별 상태, AP 가명, 근거 프레임과 Wireshark 필터를 제공합니다.
 
 | 여정 상태 | 의미 |
 |---|---|
@@ -155,6 +146,57 @@ DEVICE-1
 | `no-linked-transactions` | 단말 가명은 있지만 안전하게 연결된 거래가 없음 |
 
 단말 여정은 동일 사용자 신원이나 하나의 완전한 교차 프로토콜 세션을 확정하지 않습니다. `첫 실패 관찰 단계`는 실패 패킷이 처음 보인 위치이며 근본 원인의 위치가 아닙니다.
+
+### 9. 캡처 관찰 가능성과 미응답 해석
+
+Phase 4G는 `응답이 보이지 않았다`는 사실과 `장애가 확인됐다`는 결론을 분리합니다.
+
+불완전 거래는 다음 중 하나로 표시합니다.
+
+| 상태 | 의미 |
+|---|---|
+| `response-not-observed` | 현재 보관된 중간 프레임 범위에서 최종 응답을 관찰하지 못함 |
+| `capture-boundary-risk` | 거래가 첫 프레임 또는 마지막 관찰 프레임에 닿아 캡처 전·후 패킷 가능성이 있음 |
+| `packet-truncation-risk` | 잘린 패킷 때문에 상위 프로토콜 응답 필드가 누락됐을 수 있음 |
+| `insufficient-analysis-input` | 일부 처리, 이벤트 생략 또는 거래 근거 생략으로 해석할 수 없음 |
+
+예시:
+
+```text
+DNS-1-A1
+평가: 응답 미관찰
+근거: frame.number == 2
+응답 부재를 장애로 확정: 아니오
+```
+
+```text
+DNS-2-A1
+평가: 캡처 종료 경계 위험
+위험 요소: capture-end-boundary-risk
+응답 부재를 장애로 확정: 아니오
+```
+
+프로토콜별 요청·응답 계열 이벤트가 모두 보이더라도 양방향 전체 수집을 증명하지 않습니다.
+
+다음 값은 항상 `false`입니다.
+
+```text
+capture_start_proven
+capture_end_proven
+capture_loss_excluded
+directionality_proven
+absence_can_confirm_failure
+absence_is_failure
+```
+
+파일을 끝까지 읽었다는 사실만으로 다음을 알 수는 없습니다.
+
+- 장애 발생 전부터 캡처했는지
+- 장애 종료 후까지 캡처했는지
+- 미러링·무선 채널·캡처 프로그램에서 패킷을 잃지 않았는지
+- 송신과 수신 방향을 모두 보았는지
+
+따라서 DNS Query만 보이거나 TCP SYN만 보이는 경우 서버·방화벽·ClearPass·DHCP·DNS 장애로 자동 확정하지 않습니다.
 
 ## 중요한 해석 원칙
 
@@ -168,17 +210,7 @@ TCP RST 관찰 ≠ 서버·방화벽·애플리케이션 중 원인 확정
 TCP Retransmission 관찰 ≠ RF 장애 확정
 프로토콜 미관찰 ≠ 해당 단계 장애
 첫 실패 관찰 단계 ≠ 근본 원인 발생 위치
-```
-
-다음 값은 항상 `false`입니다.
-
-```text
-raw_identifiers_serialized
-alias_secret_persisted
-aliases_stable_across_runs
-device_identity_confirmed
-cross_protocol_session_confirmed
-root_cause_confirmed
+응답 미관찰 ≠ 응답 시스템 장애 확정
 ```
 
 ## 개인정보·사내 데이터 보호
@@ -202,7 +234,7 @@ Raw Payload·파일 내용
 TShark 표준 오류 원문
 ```
 
-원본 L2 주소는 전용 TShark stdout과 Python 파싱 메모리에 분석 중 일시적으로 존재할 수 있습니다. 메모리 포렌식까지 포함한 완전 비노출을 주장하지 않으며, 디스크·로그·JSON·GUI·릴리스 자산·외부 네트워크에 남기지 않는 것이 현재 보장 범위입니다.
+원본 L2 주소는 전용 TShark stdout과 Python 파싱 메모리에 분석 중 일시적으로 존재할 수 있습니다. 보장 범위는 디스크·로그·JSON·GUI·릴리스 자산·외부 네트워크에 남기지 않는 것입니다.
 
 ## 실행 안전장치
 
@@ -219,8 +251,6 @@ TShark 표준 오류 원문
 - 임시 작업공간 자동 삭제
 - Symlink·Junction·Reparse Point 우회 차단
 
-TShark가 임시파일을 생성·삭제하면서 바꿀 수 있는 Windows Archive·시간·디렉터리 크기는 객체 교체로 오인하지 않지만, 장치 ID·파일 ID·객체 종류·링크 수·Reparse Point와 실행 후 잔류 파일은 계속 검사합니다.
-
 ## 자원 제한
 
 - 고정 분석 프로파일 최대 100,000프레임
@@ -233,12 +263,12 @@ TShark가 임시파일을 생성·삭제하면서 바꿀 수 있는 Windows Arch
 - TShark stderr 기본 1MiB
 - 기본 실행 제한시간 180초
 
-근거 프레임이 상한 때문에 일부 생략되면 해당 거래를 단말 여정에 연결하지 않습니다.
+근거가 생략되거나 일부 처리된 경우 결과를 더 보수적으로 낮추며 장애 확정으로 승격하지 않습니다.
 
 ## SHA-256 확인
 
 ```powershell
-Get-FileHash .\WlanTroubleshooterKO-v0.9.0-alpha.1-win64-portable.zip -Algorithm SHA256
+Get-FileHash .\WlanTroubleshooterKO-v0.10.0-alpha.1-win64-portable.zip -Algorithm SHA256
 ```
 
 릴리스의 같은 이름 `.sha256` 파일과 출력값을 비교합니다. EXE에는 아직 상용 코드 서명 인증서가 없어 Windows가 `알 수 없는 게시자` 경고를 표시할 수 있습니다.
@@ -247,7 +277,8 @@ Get-FileHash .\WlanTroubleshooterKO-v0.9.0-alpha.1-win64-portable.zip -Algorithm
 
 - `DEVICE-N`을 실제 사용자·자산 신원으로 확정
 - 여러 프로토콜 거래가 하나의 완전한 사용자 세션임을 확정
-- 캡처 누락과 실제 미응답의 자동 확정 구분
+- 캡처 프로그램·SPAN·무선 채널의 실제 패킷 드롭 통계 수집
+- 응답 미관찰을 실제 미응답으로 확정하는 기능
 - 동일 단말의 EAPOL 4-Way Handshake 메시지 1~4 완결성 판정
 - BSSID·채널·RSSI 기반 로밍·RF 근본 원인 분석
 - Aruba Controller·ClearPass Role·VLAN 맞춤 점검 안내
@@ -256,4 +287,4 @@ Get-FileHash .\WlanTroubleshooterKO-v0.9.0-alpha.1-win64-portable.zip -Algorithm
 - 네트워크 어댑터 비활성·Outbound 차단·EDR 환경 검증
 - 상용 코드 서명 인증서 적용
 
-세부 경계는 `docs/PHASE_4F_PLAN.md`, 가명화 경계는 `docs/adr/0004-analysis-scoped-device-pseudonyms.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`를 확인합니다.
+세부 경계는 `docs/PHASE_4G_PLAN.md`, 단말 가명화 경계는 `docs/adr/0004-analysis-scoped-device-pseudonyms.md`, 실제 검증 상태는 `IMPLEMENTATION_STATUS.md`를 확인합니다.
