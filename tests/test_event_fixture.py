@@ -1,4 +1,5 @@
 import importlib.util
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,16 +51,24 @@ class PortableEventFixtureTests(unittest.TestCase):
         self.assertTrue(structure.scan_complete)
 
     def test_generated_wireless_fixture_is_valid_and_complete(self):
-        capture, structure = self._inspect(
-            self.wireless.build_pcap(),
-            "wireless-event-fixture.pcap",
-        )
+        raw = self.wireless.build_pcap()
+        capture, structure = self._inspect(raw, "wireless-event-fixture.pcap")
 
         self.assertEqual(capture.capture_format, "pcap")
-        self.assertEqual(structure.interfaces[0].link_type, 105)
+        self.assertEqual(structure.interfaces[0].link_type, 127)
         self.assertEqual(structure.packets_scanned, 8)
         self.assertEqual(structure.truncated_packets_observed, 0)
         self.assertTrue(structure.scan_complete)
+
+        first_record_offset = 24
+        _seconds, _micros, captured_length, original_length = struct.unpack_from(
+            "<IIII",
+            raw,
+            first_record_offset,
+        )
+        self.assertEqual(captured_length, original_length)
+        radiotap = raw[first_record_offset + 16 : first_record_offset + 24]
+        self.assertEqual(radiotap, struct.pack("<BBHI", 0, 0, 8, 0))
 
     def test_fixtures_are_deterministic_and_nonempty(self):
         for module in (self.ethernet, self.wireless):
