@@ -7,6 +7,7 @@ from wlan_troubleshooter_ko.analysis.event_timeline import (
     build_event_timeline,
 )
 from wlan_troubleshooter_ko.tshark.catalog import parse_field_catalog
+from wlan_troubleshooter_ko.tshark.inventory import adapt_connection_profile_for_timeline
 from wlan_troubleshooter_ko.tshark.profiles import load_field_profiles, resolve_profile
 
 
@@ -26,21 +27,22 @@ FIELD_TYPES = {
     "eapol.type": "FT_UINT8",
     "wlan_rsna_eapol.keydes.msgnr": "FT_UINT8",
     "eap.code": "FT_UINT8",
-    "eap.type": "FT_UINT8",
     "eap.id": "FT_UINT8",
+    "eap.type": "FT_UINT8",
     "radius.code": "FT_UINT8",
     "radius.id": "FT_UINT8",
-    "dhcp.option.dhcp": "FT_UINT8",
     "dhcp.id": "FT_UINT32",
+    "dhcp.option.dhcp": "FT_UINT8",
+    "dns.id": "FT_UINT16",
     "dns.flags.response": "FT_BOOLEAN",
     "dns.flags.rcode": "FT_UINT8",
-    "dns.id": "FT_UINT16",
+    "udp.stream": "FT_UINT32",
     "arp.opcode": "FT_UINT16",
+    "tcp.stream": "FT_UINT32",
     "tcp.flags.syn": "FT_BOOLEAN",
     "tcp.flags.ack": "FT_BOOLEAN",
     "tcp.flags.reset": "FT_BOOLEAN",
     "tcp.analysis.retransmission": "FT_NONE",
-    "tcp.stream": "FT_UINT32",
     "tls.handshake.type": "FT_UINT8",
 }
 
@@ -67,11 +69,12 @@ class EventTimelineTests(unittest.TestCase):
                     protocol,
                 )
             )
-        cls.profile = resolve_profile(
+        connection_profile = resolve_profile(
             cls.registry,
             parse_field_catalog(catalog_lines),
-            "event-timeline",
+            "connection-events",
         )
+        cls.profile = adapt_connection_profile_for_timeline(connection_profile)
 
     def output(self, rows):
         header = "\t".join(self.profile.headers())
@@ -196,11 +199,12 @@ class EventTimelineTests(unittest.TestCase):
                     field_type,
                 )
             )
-        profile = resolve_profile(
+        connection_profile = resolve_profile(
             self.registry,
             parse_field_catalog(lines),
-            "event-timeline",
+            "connection-events",
         )
+        profile = adapt_connection_profile_for_timeline(connection_profile)
         header = "\t".join(profile.headers())
         row = "\t".join(
             {
@@ -220,10 +224,7 @@ class EventTimelineTests(unittest.TestCase):
         self.assertTrue(timeline.missing_optional_fields)
 
     def test_event_retention_limit_preserves_full_summary_count(self):
-        rows = [
-            self.row(index, "wlan", wlan_retry=1)
-            for index in range(1, 21)
-        ]
+        rows = [self.row(index, "wlan", wlan_retry=1) for index in range(1, 21)]
         timeline = build_event_timeline(
             self.output(rows),
             self.profile,
