@@ -148,6 +148,7 @@ try {
         event_timeline_runtime = "enabled"
         transaction_session_runtime = "enabled"
         device_session_runtime = "enabled"
+        device_journey_runtime = "enabled"
         raw_identifier_serialization = "disabled"
         alias_secret_persistence = "disabled"
         cross_run_alias_stability = "disabled"
