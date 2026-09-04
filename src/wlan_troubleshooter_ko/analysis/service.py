@@ -1,4 +1,4 @@
-"""캡처 사전 점검부터 단말 여정·관찰 가능성까지 조정한다."""
+"""캡처 사전 점검부터 단말 여정·관찰 가능성·EAPOL 순서까지 조정한다."""
 
 from __future__ import annotations
 
@@ -14,6 +14,11 @@ from wlan_troubleshooter_ko.analysis.capture_observability import (
 )
 from wlan_troubleshooter_ko.analysis.device_journeys import DeviceJourneyError
 from wlan_troubleshooter_ko.analysis.device_sessions import DeviceSessionError
+from wlan_troubleshooter_ko.analysis.eapol_handshakes import (
+    EapolHandshakeError,
+    EapolHandshakeReport,
+    build_eapol_handshakes,
+)
 from wlan_troubleshooter_ko.analysis.event_correlation import EventCorrelationError
 from wlan_troubleshooter_ko.analysis.event_timeline import EventTimelineError
 from wlan_troubleshooter_ko.analysis.models import (
@@ -68,6 +73,7 @@ class CaptureAnalysisResult:
     inventory_message: str
     protocol_inventory: Optional[ProtocolInventoryRun]
     capture_observability: Optional[CaptureObservabilityReport] = None
+    eapol_handshakes: Optional[EapolHandshakeReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -91,6 +97,11 @@ class CaptureAnalysisResult:
                 if self.capture_observability is None
                 else self.capture_observability.to_dict()
             ),
+            "eapol_handshakes": (
+                None
+                if self.eapol_handshakes is None
+                else self.eapol_handshakes.to_dict()
+            ),
         }
 
 
@@ -106,6 +117,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             DeviceSessionError,
             DeviceJourneyError,
             CaptureObservabilityError,
+            EapolHandshakeError,
         ),
     ):
         return str(exc)
@@ -126,7 +138,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             "배포 ZIP을 다시 압축 해제해 주세요."
         )
     return (
-        "접속 단계·이벤트·거래·단말 여정·캡처 관찰 가능성을 "
+        "접속 단계·이벤트·거래·단말 여정·캡처 관찰 가능성·EAPOL 순서를 "
         "안전하게 완료하지 못했습니다."
     )
 
@@ -148,6 +160,7 @@ def _without_inventory(
         inventory_message=message,
         protocol_inventory=None,
         capture_observability=None,
+        eapol_handshakes=None,
     )
 
 
@@ -161,7 +174,7 @@ def analyze_capture(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> CaptureAnalysisResult:
-    """내장 TShark로 Finding, 단말 여정과 관찰 가능성을 분석한다."""
+    """내장 TShark로 Finding, 단말 여정, 관찰 가능성과 EAPOL 순서를 분석한다."""
 
     try:
         capture: CaptureInfo = validate_capture(
@@ -237,14 +250,19 @@ def analyze_capture(
         if (
             inventory_run.event_timeline is None
             or inventory_run.transaction_sessions is None
+            or inventory_run.device_sessions is None
         ):
             raise CaptureObservabilityError(
-                "캡처 관찰 가능성에 필요한 이벤트·거래 결과가 없습니다."
+                "후속 분석에 필요한 이벤트·거래·단말 가명 결과가 없습니다."
             )
         observability = build_capture_observability(
             structure,
             inventory_run.event_timeline,
             inventory_run.transaction_sessions,
+        )
+        eapol_handshakes = build_eapol_handshakes(
+            inventory_run.event_timeline,
+            inventory_run.device_sessions,
         )
     except Exception as exc:
         return _without_inventory(
@@ -264,9 +282,10 @@ def analyze_capture(
         inventory_state="completed",
         inventory_message=(
             "내장 TShark로 프로토콜 인벤토리, 접속 단계 Finding, "
-            "비식별 이벤트·거래, 단말 가명·여정과 캡처 관찰 가능성 분석을 "
-            "완료했습니다."
+            "비식별 이벤트·거래, 단말 가명·여정, 캡처 관찰 가능성과 "
+            "EAPOL-Key 메시지 순서 관찰을 완료했습니다."
         ),
         protocol_inventory=inventory_run,
         capture_observability=observability,
+        eapol_handshakes=eapol_handshakes,
     )
