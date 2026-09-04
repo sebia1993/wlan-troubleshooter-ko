@@ -263,22 +263,24 @@ class EapolHandshakeTests(unittest.TestCase):
         )
         first = report.to_dict()
         second = report.to_dict()
-        rendered = json.dumps(first, ensure_ascii=False)
+        rendered = json.dumps(first, ensure_ascii=False).casefold()
 
         self.assertEqual(first, second)
-        self.assertIn("DEVICE-1", rendered)
-        self.assertIn("AP-1", rendered)
+        self.assertIn("device-1", rendered)
+        self.assertIn("ap-1", rendered)
         self.assertIn("frame.number == 1", rendered)
         for forbidden in (
             "02:00:00",
-            "nonce",
-            "mic",
-            "key_data",
-            "replay_counter",
+            "0000000000000001",
+            "a1a1a1a1a1a1a1a1",
+            "cccccccccccccccc",
+            "nonce_value",
+            "mic_value",
+            "key_data_value",
             "192.0.2",
             "example.test",
         ):
-            self.assertNotIn(forbidden, rendered.casefold())
+            self.assertNotIn(forbidden, rendered)
         self.assertFalse(first["replay_counter_correlation_available"])
         self.assertFalse(first["raw_key_material_serialized"])
         self.assertFalse(first["raw_identifiers_serialized"])
