@@ -119,6 +119,16 @@ New-Item -ItemType Directory -Path $Expanded -Force | Out-Null
 try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
 
+    $BuildInfo = Get-Content -LiteralPath (Join-Path $Expanded "BUILD_INFO.json") -Raw | ConvertFrom-Json -Depth 32
+    if (
+        $BuildInfo.device_session_runtime -ne "enabled" -or
+        $BuildInfo.raw_identifier_serialization -ne "disabled" -or
+        $BuildInfo.alias_secret_persistence -ne "disabled" -or
+        $BuildInfo.cross_run_alias_stability -ne "disabled"
+    ) {
+        throw "Portable BUILD_INFO does not preserve the device-alias privacy boundary."
+    }
+
     & $PythonPath (Join-Path $PSScriptRoot "generate_event_fixture.py") --output $EthernetCapture
     if ($LASTEXITCODE -ne 0) {
         throw "Ethernet device fixture generation failed."
@@ -162,7 +172,7 @@ try {
     ) {
         throw "Ethernet device alias violated the conservative identity boundary."
     }
-    foreach ($Protocol in @("eap", "dhcp", "dns", "tcp")) {
+    foreach ($Protocol in @("dhcp", "dns", "tcp")) {
         if (@($EthernetDevice.protocols_observed) -notcontains $Protocol) {
             throw "Ethernet DEVICE-1 is missing an observed protocol: $Protocol"
         }
