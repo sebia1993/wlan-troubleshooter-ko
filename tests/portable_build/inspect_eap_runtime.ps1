@@ -39,11 +39,11 @@ function Write-SafeSchemaLines {
         }
     })
     if ($Safe.Count -eq 0) {
-        Write-Host "$Label: none"
+        Write-Host "${Label}: none"
     }
     else {
         foreach ($Line in $Safe | Select-Object -First 30) {
-            Write-Host "$Label: $Line"
+            Write-Host "${Label}: $Line"
         }
     }
 }
