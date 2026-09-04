@@ -57,7 +57,12 @@ class PortableSupplyChainTests(unittest.TestCase):
         self.assertIn("pyinstaller==" + self.value["pyinstaller_version"], [line.casefold() for line in lines])
 
     def test_build_scripts_accept_no_url_or_version_parameters(self):
-        for filename in ("build_portable.ps1", "finalize_portable.ps1", "verify_protocol_inventory.ps1"):
+        for filename in (
+            "build_portable.ps1",
+            "finalize_portable.ps1",
+            "verify_protocol_inventory.ps1",
+            "verify_event_timeline.ps1",
+        ):
             text = (self.support / filename).read_text(encoding="utf-8")
             parameter_block = text.split(")", 1)[0]
             for forbidden in ("Url", "Uri", "Version", "Hash", "Installer"):
@@ -80,17 +85,20 @@ class PortableSupplyChainTests(unittest.TestCase):
             "WlanTroubleshooterKO.exe",
             "release-tag",
             "protocol_inventory_runtime",
+            "event_timeline_runtime",
         ):
             self.assertIn(value, text)
 
-    def test_portable_workflows_run_real_finding_gate(self):
+    def test_portable_workflows_run_real_finding_and_timeline_gates(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
         ):
             text = (self.root / relative).read_text(encoding="utf-8")
             self.assertIn("verify_protocol_inventory.ps1", text)
-        verifier = (self.support / "verify_protocol_inventory.ps1").read_text(encoding="utf-8")
+            self.assertIn("verify_event_timeline.ps1", text)
+
+        finding_verifier = (self.support / "verify_protocol_inventory.ps1").read_text(encoding="utf-8")
         for value in (
             "--analyze-capture",
             "frames_observed",
@@ -103,7 +111,33 @@ class PortableSupplyChainTests(unittest.TestCase):
             "evidence_frames",
             "display_filter",
         ):
-            self.assertIn(value, verifier)
+            self.assertIn(value, finding_verifier)
+
+        timeline_verifier = (self.support / "verify_event_timeline.ps1").read_text(encoding="utf-8")
+        for value in (
+            "generate_event_fixture.py",
+            "generate_wireless_event_fixture.py",
+            "event_timeline_runtime",
+            "eap_success",
+            "radius_access_accept",
+            "dhcp_ack",
+            "dns_response_success",
+            "tcp_syn_ack",
+            "wlan_auth_response_success",
+            "wlan_assoc_response_success",
+            "wlan_deauthentication",
+        ):
+            self.assertIn(value, timeline_verifier)
+
+    def test_event_fixtures_are_generated_at_runtime_not_committed(self):
+        ethernet = (self.support / "generate_event_fixture.py").read_text(encoding="utf-8")
+        wireless = (self.support / "generate_wireless_event_fixture.py").read_text(encoding="utf-8")
+        for value in ("build_pcap", "_eapol", "_radius", "_dhcp", "_dns_response", "_tcp_frame"):
+            self.assertIn(value, ethernet)
+        for value in ("build_pcap", "_authentication", "_association_response", "_eapol_data"):
+            self.assertIn(value, wireless)
+        self.assertFalse(any(self.root.rglob("*.pcap")))
+        self.assertFalse(any(self.root.rglob("*.pcapng")))
 
 
 if __name__ == "__main__":
