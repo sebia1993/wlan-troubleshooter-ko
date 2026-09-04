@@ -62,6 +62,7 @@ class PortableSupplyChainTests(unittest.TestCase):
             "finalize_portable.ps1",
             "verify_protocol_inventory.ps1",
             "verify_event_timeline.ps1",
+            "verify_transaction_sessions.ps1",
         ):
             text = (self.support / filename).read_text(encoding="utf-8")
             parameter_block = text.split(")", 1)[0]
@@ -86,10 +87,11 @@ class PortableSupplyChainTests(unittest.TestCase):
             "release-tag",
             "protocol_inventory_runtime",
             "event_timeline_runtime",
+            "transaction_session_runtime",
         ):
             self.assertIn(value, text)
 
-    def test_portable_workflows_run_real_finding_and_timeline_gates(self):
+    def test_portable_workflows_run_real_finding_timeline_and_transaction_gates(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -97,6 +99,7 @@ class PortableSupplyChainTests(unittest.TestCase):
             text = (self.root / relative).read_text(encoding="utf-8")
             self.assertIn("verify_protocol_inventory.ps1", text)
             self.assertIn("verify_event_timeline.ps1", text)
+            self.assertIn("verify_transaction_sessions.ps1", text)
 
         finding_verifier = (self.support / "verify_protocol_inventory.ps1").read_text(encoding="utf-8")
         for value in (
@@ -108,8 +111,11 @@ class PortableSupplyChainTests(unittest.TestCase):
             '"DNS-ERROR-RESPONSE"',
             '"TCP-RST"',
             "event_correlation",
-            "evidence_frames",
-            "display_filter",
+            "transaction_sessions",
+            "DNS-1-A1",
+            "TCP-1-A1",
+            "root_cause_confirmed",
+            "device_session_confirmed",
         ):
             self.assertIn(value, finding_verifier)
 
@@ -130,6 +136,26 @@ class PortableSupplyChainTests(unittest.TestCase):
             "PPP EAP",
         ):
             self.assertIn(value, timeline_verifier)
+
+        transaction_verifier = (self.support / "verify_transaction_sessions.ps1").read_text(encoding="utf-8")
+        for value in (
+            "transaction_session_runtime",
+            "radius_access_request",
+            "radius_access_accept",
+            "dhcp_discover",
+            "dhcp_ack",
+            "dns_query",
+            "dns_response_success",
+            "tcp_syn",
+            "tcp_syn_ack",
+            "tcp_reset",
+            "eap_request",
+            "eap_response",
+            "eap_success",
+            "root_cause_confirmed",
+            "device_session_confirmed",
+        ):
+            self.assertIn(value, transaction_verifier)
 
     def test_event_fixtures_are_generated_at_runtime_not_committed(self):
         ethernet = (self.support / "generate_event_fixture.py").read_text(encoding="utf-8")
