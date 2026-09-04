@@ -174,7 +174,7 @@ def classify_capture_capabilities(
         else:
             cautions.append("PCAPNG 드롭 카운터가 없거나 0이어도 캡처 손실이 없었다고 확정하지 않습니다.")
     elif structure.capture_format == "pcapng":
-        cautions.append("PCAPNG Interface Statistics Block이 없어 캡처 도구 드롭 카운터를 확인할 수 없습니다.")
+        cautions.append("PCAPNG 인터페이스 통계(Interface Statistics Block)가 없어 캡처 도구 드롭 카운터를 확인할 수 없습니다.")
     if link_types & PPI_LINK_TYPES:
         cautions.append("PPI는 내부 캡슐화를 확인하기 전 802.11·RF·IP 캡처로 확정하지 않습니다.")
     if structure.truncated_packets_observed:
