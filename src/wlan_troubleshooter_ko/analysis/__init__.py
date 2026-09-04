@@ -1,5 +1,12 @@
-"""결정론적 캡처 점검, Finding, 타임라인과 비식별 거래 시도."""
+"""결정론적 캡처 점검, Finding, 거래 시도와 실행별 단말 가명."""
 
+from wlan_troubleshooter_ko.analysis.device_sessions import (
+    DeviceAttemptLink,
+    DeviceSession,
+    DeviceSessionError,
+    DeviceSessionReport,
+    build_device_sessions,
+)
 from wlan_troubleshooter_ko.analysis.event_correlation import (
     DiagnosticFinding,
     EventCorrelation,
@@ -49,6 +56,10 @@ __all__ = [
     "CaptureCapabilityReport",
     "CaptureStructure",
     "CaptureStructureError",
+    "DeviceAttemptLink",
+    "DeviceSession",
+    "DeviceSessionError",
+    "DeviceSessionReport",
     "DiagnosticFinding",
     "EventCorrelation",
     "EventCorrelationError",
@@ -66,6 +77,7 @@ __all__ = [
     "TransactionSessionError",
     "TransactionSessionReport",
     "analyze_capture",
+    "build_device_sessions",
     "build_event_correlation",
     "build_event_timeline",
     "build_protocol_inventory",
