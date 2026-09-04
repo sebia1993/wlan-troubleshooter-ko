@@ -1,10 +1,10 @@
-"""Build conservative per-device journeys from already pseudonymized results.
+"""Build conservative per-device journeys from pseudonymized analysis results.
 
-The module accepts only ``DEVICE-N`` aliases, transaction-attempt metadata and
-packet evidence produced by earlier analysis stages. It never receives raw
-addresses, SSIDs, user identities, host names, ports or original transaction
-identifiers. A journey is an observation grouping, not a confirmed user session
-or root-cause conclusion.
+Only ``DEVICE-N``/``AP-N`` aliases, transaction-attempt metadata and packet
+numbers are accepted. Raw addresses, SSIDs, identities, host names, ports and
+original transaction identifiers are neither accepted nor serialized. A
+journey is an observational grouping, never a confirmed user session or root
+cause.
 """
 
 from __future__ import annotations
@@ -21,7 +21,8 @@ _ATTEMPT_PATTERN = re.compile(
 )
 _MAX_DEVICES = 20_000
 _MAX_ATTEMPTS = 50_000
-_MAX_EVIDENCE_FRAMES = 96
+_MAX_SOURCE_EVIDENCE_FRAMES = 64
+_MAX_JOURNEY_EVIDENCE_FRAMES = 96
 
 _STAGE_ORDER = ("eap", "radius", "dhcp", "dns", "tcp")
 _STAGE_LABELS = {
@@ -44,7 +45,7 @@ _FAILURE_STATES = {"failure-observed", "mixed"}
 
 
 class DeviceJourneyError(ValueError):
-    """Pseudonymized device/transaction results violate journey invariants."""
+    """Pseudonymized source reports violate journey invariants."""
 
 
 @dataclass(frozen=True)
@@ -153,9 +154,7 @@ class DeviceJourneyReport:
         return {
             "schema_version": 1,
             "journeys_total": len(self.journeys),
-            "journeys_by_state": {
-                key: value for key, value in self.journeys_by_state
-            },
+            "journeys_by_state": dict(self.journeys_by_state),
             "linked_attempts_total": self.linked_attempts_total,
             "unassigned_attempts": self.unassigned_attempts,
             "ambiguous_attempts": self.ambiguous_attempts,
@@ -192,6 +191,11 @@ def _boolean(value: object, name: str, label: str) -> bool:
     if type(result) is not bool:
         raise DeviceJourneyError(label + " 완료 상태가 올바르지 않습니다.")
     return result
+
+
+def _must_be_false(value: object, name: str, label: str) -> None:
+    if _attribute(value, name, label) is not False:
+        raise DeviceJourneyError(label + " 개인정보 보호 플래그는 false여야 합니다.")
 
 
 def _positive_integer(value: object, label: str) -> int:
@@ -246,6 +250,24 @@ def _attempt_protocol(attempt_id: str) -> str:
     return match.group(1).casefold()
 
 
+def _validate_device_report_privacy(device_sessions: object) -> None:
+    _must_be_false(
+        device_sessions,
+        "raw_identifiers_serialized",
+        "단말 가명 보고서",
+    )
+    _must_be_false(
+        device_sessions,
+        "alias_secret_persisted",
+        "단말 가명 보고서",
+    )
+    _must_be_false(
+        device_sessions,
+        "aliases_stable_across_runs",
+        "단말 가명 보고서",
+    )
+
+
 def _validated_attempts(transaction_sessions: object) -> Dict[str, object]:
     values = _collection(transaction_sessions, "attempts", "거래 시도 보고서")
     if len(values) > _MAX_ATTEMPTS:
@@ -283,19 +305,28 @@ def _validated_attempts(transaction_sessions: object) -> Dict[str, object]:
             _attribute(value, "evidence_frames", "거래 시도"),
             "거래 근거",
         )
-        omitted = _nonnegative_integer(
+        if len(evidence) > _MAX_SOURCE_EVIDENCE_FRAMES:
+            raise DeviceJourneyError("거래 근거 프레임이 원본 안전 상한을 초과했습니다.")
+        _nonnegative_integer(
             _attribute(value, "evidence_frames_omitted", "거래 시도"),
             "거래 근거 생략 수",
         )
-        if omitted and evidence:
-            # Phase 4E removes truncated evidence before it can be linked.
-            pass
         if any(frame < first_frame or frame > last_frame for frame in evidence):
             raise DeviceJourneyError("거래 근거 프레임이 거래 범위를 벗어났습니다.")
-        if _attribute(value, "root_cause_confirmed", "거래 시도") is not False:
-            raise DeviceJourneyError("거래 시도 근본 원인 확정 값은 false여야 합니다.")
-        if _attribute(value, "device_session_confirmed", "거래 시도") is not False:
-            raise DeviceJourneyError("거래 시도 단말 세션 확정 값은 false여야 합니다.")
+        _string_tuple(
+            _attribute(value, "observed_event_types", "거래 시도"),
+            "관찰 이벤트",
+        )
+        _string_tuple(
+            _attribute(value, "missing_event_types", "거래 시도"),
+            "미관찰 이벤트",
+        )
+        _string_tuple(
+            _attribute(value, "next_checks_ko", "거래 시도"),
+            "다음 점검 항목",
+        )
+        _must_be_false(value, "root_cause_confirmed", "거래 시도")
+        _must_be_false(value, "device_session_confirmed", "거래 시도")
         result[attempt_id] = value
     return result
 
@@ -311,10 +342,8 @@ def _validated_devices(device_sessions: object) -> Dict[str, object]:
             raise DeviceJourneyError("단말 가명 형식이 올바르지 않습니다.")
         if alias in result:
             raise DeviceJourneyError("단말 가명이 중복됐습니다.")
-        if _attribute(value, "device_identity_confirmed", "단말 가명") is not False:
-            raise DeviceJourneyError("단말 신원 확정 값은 false여야 합니다.")
-        if _attribute(value, "cross_protocol_session_confirmed", "단말 가명") is not False:
-            raise DeviceJourneyError("교차 프로토콜 세션 확정 값은 false여야 합니다.")
+        _must_be_false(value, "device_identity_confirmed", "단말 가명")
+        _must_be_false(value, "cross_protocol_session_confirmed", "단말 가명")
         first_frame = _positive_integer(
             _attribute(value, "first_frame", "단말 가명"),
             "단말 첫 프레임",
@@ -335,10 +364,12 @@ def _validated_devices(device_sessions: object) -> Dict[str, object]:
         )
         if any(_AP_PATTERN.fullmatch(item) is None for item in ap_aliases):
             raise DeviceJourneyError("AP 가명 형식이 올바르지 않습니다.")
-        _string_tuple(
+        linked_ids = _string_tuple(
             _attribute(value, "linked_attempt_ids", "단말 가명"),
             "단말 연결 거래",
         )
+        if any(_ATTEMPT_PATTERN.fullmatch(item) is None for item in linked_ids):
+            raise DeviceJourneyError("단말 연결 거래 ID 형식이 올바르지 않습니다.")
         result[alias] = value
     return result
 
@@ -364,10 +395,26 @@ def _validated_links(
         seen.add(attempt_id)
         if state not in _ALLOWED_LINK_STATES:
             raise DeviceJourneyError("단말 거래 연결 상태가 올바르지 않습니다.")
+
+        link_evidence = _integer_tuple(
+            _attribute(value, "evidence_frames", "단말 거래 연결"),
+            "단말 거래 연결 근거",
+        )
+        attempt = attempts[attempt_id]
+        attempt_evidence = _integer_tuple(
+            _attribute(attempt, "evidence_frames", "거래 시도"),
+            "거래 근거",
+        )
+        if link_evidence != attempt_evidence:
+            raise DeviceJourneyError(
+                "단말 거래 연결 근거와 원 거래 근거가 일치하지 않습니다."
+            )
+
         if state == "linked":
             if not isinstance(device_alias, str) or device_alias not in devices:
                 raise DeviceJourneyError("연결된 거래의 단말 가명이 올바르지 않습니다.")
-            attempt = attempts[attempt_id]
+            if not attempt_evidence:
+                raise DeviceJourneyError("근거 프레임이 없는 거래는 단말 여정에 연결할 수 없습니다.")
             if _nonnegative_integer(
                 _attribute(attempt, "evidence_frames_omitted", "거래 시도"),
                 "거래 근거 생략 수",
@@ -383,9 +430,9 @@ def _validated_links(
                 unassigned += 1
             else:
                 ambiguous += 1
+
     if seen != set(attempts):
         raise DeviceJourneyError("일부 거래 시도에 단말 연결 결과가 없습니다.")
-
     expected_by_device: Dict[str, Set[str]] = {key: set() for key in devices}
     for attempt_id, alias in linked.items():
         expected_by_device[alias].add(attempt_id)
@@ -416,9 +463,7 @@ def _attempt_order(value: object) -> Tuple[int, int, str]:
 
 
 def _stage_state(attempts: Sequence[object]) -> Tuple[str, str]:
-    states = {
-        str(_attribute(item, "state", "거래 시도")) for item in attempts
-    }
+    states = {str(_attribute(item, "state", "거래 시도")) for item in attempts}
     has_positive = bool(states.intersection(_POSITIVE_STATES))
     has_failure = bool(states.intersection(_FAILURE_STATES))
     has_incomplete = "incomplete" in states
@@ -462,21 +507,9 @@ def _freeze_stage(protocol: str, attempts: Sequence[object]) -> DeviceJourneySta
     if not ordered:
         raise DeviceJourneyError("비어 있는 단말 여정 단계를 만들 수 없습니다.")
     state, summary = _stage_state(ordered)
-    first_frame = min(
-        _positive_integer(
-            _attribute(item, "first_frame", "거래 시도"),
-            "거래 시작 프레임",
-        )
-        for item in ordered
-    )
-    last_frame = max(
-        _positive_integer(
-            _attribute(item, "last_frame", "거래 시도"),
-            "거래 마지막 프레임",
-        )
-        for item in ordered
-    )
-    frames = tuple(
+    first_frame = min(_attempt_order(item)[0] for item in ordered)
+    last_frame = max(_attempt_order(item)[1] for item in ordered)
+    all_frames = tuple(
         sorted(
             {
                 frame
@@ -488,7 +521,7 @@ def _freeze_stage(protocol: str, attempts: Sequence[object]) -> DeviceJourneySta
             }
         )
     )
-    evidence = frames[:_MAX_EVIDENCE_FRAMES]
+    evidence = all_frames[:_MAX_JOURNEY_EVIDENCE_FRAMES]
     observed = _unique_strings(
         event
         for item in ordered
@@ -518,9 +551,7 @@ def _freeze_stage(protocol: str, attempts: Sequence[object]) -> DeviceJourneySta
         label_ko=_STAGE_LABELS[protocol],
         state=state,
         summary_ko=summary,
-        attempt_ids=tuple(
-            str(_attribute(item, "attempt_id", "거래 시도")) for item in ordered
-        ),
+        attempt_ids=tuple(str(_attribute(item, "attempt_id", "거래 시도")) for item in ordered),
         attempt_count=len(ordered),
         first_frame=first_frame,
         last_frame=last_frame,
@@ -532,7 +563,7 @@ def _freeze_stage(protocol: str, attempts: Sequence[object]) -> DeviceJourneySta
             for item in ordered
         ),
         evidence_frames=evidence,
-        evidence_frames_omitted=max(0, len(frames) - len(evidence)),
+        evidence_frames_omitted=max(0, len(all_frames) - len(evidence)),
         display_filter=_display_filter(evidence),
         observed_event_types=observed,
         missing_event_types=missing,
@@ -575,20 +606,12 @@ def _journey_state(stages: Sequence[DeviceJourneyStage]) -> Tuple[str, str]:
 
 def _freeze_journey(device: object, attempts: Sequence[object]) -> DeviceJourney:
     alias = str(_attribute(device, "alias", "단말 가명"))
-    first_frame = _positive_integer(
-        _attribute(device, "first_frame", "단말 가명"),
-        "단말 첫 프레임",
-    )
-    last_frame = _positive_integer(
-        _attribute(device, "last_frame", "단말 가명"),
-        "단말 마지막 프레임",
-    )
-    duration_ms = _nonnegative_integer(
-        _attribute(device, "duration_ms", "단말 가명"),
-        "단말 상대 지속시간",
-    )
+    first_frame = _positive_integer(_attribute(device, "first_frame", "단말 가명"), "단말 첫 프레임")
+    last_frame = _positive_integer(_attribute(device, "last_frame", "단말 가명"), "단말 마지막 프레임")
+    duration_ms = _nonnegative_integer(_attribute(device, "duration_ms", "단말 가명"), "단말 상대 지속시간")
+    ordered_attempts = tuple(sorted(attempts, key=_attempt_order))
     by_protocol: Dict[str, List[object]] = {}
-    for attempt in attempts:
+    for attempt in ordered_attempts:
         protocol = str(_attribute(attempt, "protocol", "거래 시도"))
         by_protocol.setdefault(protocol, []).append(attempt)
     stages = tuple(
@@ -601,44 +624,53 @@ def _freeze_journey(device: object, attempts: Sequence[object]) -> DeviceJourney
         item.protocol
         for item in sorted(
             stages,
-            key=lambda item: (
-                item.first_frame,
-                _STAGE_ORDER.index(item.protocol),
-            ),
+            key=lambda item: (item.first_frame, _STAGE_ORDER.index(item.protocol)),
         )
     )
-    failure_stages = [
-        item for item in stages if item.state in _FAILURE_STATES
-    ]
-    positive_stages = [
+    failure_attempts = [
         item
-        for item in stages
-        if item.state in _POSITIVE_STATES or item.state == "partial-progress"
+        for item in ordered_attempts
+        if _attribute(item, "state", "거래 시도") in _FAILURE_STATES
+    ]
+    positive_attempts = [
+        item
+        for item in ordered_attempts
+        if _attribute(item, "state", "거래 시도") in _POSITIVE_STATES
     ]
     first_failure = (
-        min(failure_stages, key=lambda item: item.first_frame).protocol
-        if failure_stages
+        str(_attribute(min(failure_attempts, key=_attempt_order), "protocol", "거래 시도"))
+        if failure_attempts
         else None
     )
     last_positive = (
-        max(positive_stages, key=lambda item: item.last_frame).protocol
-        if positive_stages
+        str(
+            _attribute(
+                max(positive_attempts, key=lambda item: (_attempt_order(item)[1], _attempt_order(item)[0])),
+                "protocol",
+                "거래 시도",
+            )
+        )
+        if positive_attempts
         else None
     )
     all_frames = tuple(
-        sorted({frame for item in stages for frame in item.evidence_frames})
+        sorted(
+            {
+                frame
+                for item in ordered_attempts
+                for frame in _integer_tuple(
+                    _attribute(item, "evidence_frames", "거래 시도"),
+                    "거래 근거",
+                )
+            }
+        )
     )
-    evidence = all_frames[:_MAX_EVIDENCE_FRAMES]
-    omitted = sum(item.evidence_frames_omitted for item in stages)
-    omitted += max(0, len(all_frames) - len(evidence))
+    evidence = all_frames[:_MAX_JOURNEY_EVIDENCE_FRAMES]
     return DeviceJourney(
         device_alias=alias,
         ap_aliases=tuple(
             sorted(
-                _string_tuple(
-                    _attribute(device, "ap_aliases", "단말 가명"),
-                    "AP 가명",
-                ),
+                _string_tuple(_attribute(device, "ap_aliases", "단말 가명"), "AP 가명"),
                 key=_alias_sort,
             )
         ),
@@ -647,16 +679,13 @@ def _freeze_journey(device: object, attempts: Sequence[object]) -> DeviceJourney
         first_frame=first_frame,
         last_frame=last_frame,
         duration_ms=duration_ms,
-        linked_attempt_ids=tuple(
-            str(_attribute(item, "attempt_id", "거래 시도"))
-            for item in sorted(attempts, key=_attempt_order)
-        ),
+        linked_attempt_ids=tuple(str(_attribute(item, "attempt_id", "거래 시도")) for item in ordered_attempts),
         observed_stage_order=observed_order,
         stages=stages,
         first_failure_stage=first_failure,
         last_positive_stage=last_positive,
         evidence_frames=evidence,
-        evidence_frames_omitted=omitted,
+        evidence_frames_omitted=max(0, len(all_frames) - len(evidence)),
         display_filter=_display_filter(evidence),
     )
 
@@ -667,17 +696,12 @@ def build_device_journeys(
 ) -> DeviceJourneyReport:
     """Create per-device observational journeys without identity inference."""
 
+    _validate_device_report_privacy(device_sessions)
     attempts = _validated_attempts(transaction_sessions)
     devices = _validated_devices(device_sessions)
-    linked, unassigned, ambiguous = _validated_links(
-        device_sessions,
-        attempts,
-        devices,
-    )
+    linked, unassigned, ambiguous = _validated_links(device_sessions, attempts, devices)
 
-    attempts_by_device: Dict[str, List[object]] = {
-        alias: [] for alias in devices
-    }
+    attempts_by_device: Dict[str, List[object]] = {alias: [] for alias in devices}
     for attempt_id, device_alias in linked.items():
         attempts_by_device[device_alias].append(attempts[attempt_id])
 
@@ -689,20 +713,12 @@ def build_device_journeys(
     for journey in journeys:
         state_counts[journey.state] = state_counts.get(journey.state, 0) + 1
 
-    device_source_complete = _boolean(
-        device_sessions,
-        "complete",
-        "단말 가명 보고서",
-    )
-    transaction_source_complete = _boolean(
-        transaction_sessions,
-        "complete",
-        "거래 시도 보고서",
-    )
+    device_source_complete = _boolean(device_sessions, "complete", "단말 가명 보고서")
+    transaction_source_complete = _boolean(transaction_sessions, "complete", "거래 시도 보고서")
     source_complete = device_source_complete and transaction_source_complete
     linkage_complete = unassigned == 0 and ambiguous == 0
     complete = source_complete and linkage_complete
-    devices_without = sum(1 for value in attempts_by_device.values() if not value)
+    devices_without = sum(1 for values in attempts_by_device.values() if not values)
 
     cautions = [
         "DEVICE-N은 현재 분석 실행에서만 유효하며 다른 실행의 같은 번호와 비교할 수 없습니다.",
@@ -712,20 +728,11 @@ def build_device_journeys(
         "거래 또는 단계 미관찰은 캡처 시작·종료·방향·잘림 때문에 생길 수 있습니다.",
     ]
     if ambiguous:
-        cautions.insert(
-            0,
-            "둘 이상의 단말 근거가 있는 거래가 있어 해당 거래를 여정에서 제외했습니다.",
-        )
+        cautions.insert(0, "둘 이상의 단말 근거가 있는 거래가 있어 해당 거래를 여정에서 제외했습니다.")
     if unassigned:
-        cautions.insert(
-            0,
-            "단말 근거가 없는 거래가 있어 모든 프로토콜 단계를 여정에 포함하지 못했습니다.",
-        )
+        cautions.insert(0, "단말 근거가 없는 거래가 있어 모든 프로토콜 단계를 여정에 포함하지 못했습니다.")
     if not source_complete:
-        cautions.insert(
-            0,
-            "입력 분석이 일부 결과이므로 단말 가명별 여정도 일부 결과입니다.",
-        )
+        cautions.insert(0, "입력 분석이 일부 결과이므로 단말 가명별 여정도 일부 결과입니다.")
 
     return DeviceJourneyReport(
         journeys=journeys,
