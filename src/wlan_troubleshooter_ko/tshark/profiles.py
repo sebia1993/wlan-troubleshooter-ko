@@ -36,6 +36,9 @@ _PROFILE_REQUIRED_OUTPUT_KEYS = {
         "time_epoch",
         "protocols",
     },
+    "eapol-replay-relations": {
+        "frame_number",
+    },
 }
 
 
