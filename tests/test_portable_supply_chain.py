@@ -9,10 +9,20 @@ class PortableSupplyChainTests(unittest.TestCase):
     def setUpClass(cls):
         cls.root = Path(__file__).resolve().parents[1]
         cls.support = cls.root / "tests" / "portable_build"
-        cls.value = json.loads((cls.support / "supply-chain.json").read_text(encoding="utf-8"))
+        cls.value = json.loads(
+            (cls.support / "supply-chain.json").read_text(encoding="utf-8")
+        )
 
     def test_supply_chain_schema_and_versions_are_exact(self):
-        self.assertEqual(set(self.value), {"schema_version", "python_version", "pyinstaller_version", "wireshark"})
+        self.assertEqual(
+            set(self.value),
+            {
+                "schema_version",
+                "python_version",
+                "pyinstaller_version",
+                "wireshark",
+            },
+        )
         self.assertEqual(self.value["schema_version"], 1)
         self.assertEqual(self.value["python_version"], "3.13")
         self.assertEqual(self.value["pyinstaller_version"], "6.22.2")
@@ -47,14 +57,19 @@ class PortableSupplyChainTests(unittest.TestCase):
     def test_build_requirements_are_exact_and_match_pyinstaller(self):
         lines = [
             line.strip()
-            for line in (self.support / "requirements-build.txt").read_text(encoding="utf-8").splitlines()
+            for line in (
+                self.support / "requirements-build.txt"
+            ).read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
         self.assertTrue(lines)
         self.assertEqual(lines, sorted(lines, key=str.casefold))
         for line in lines:
             self.assertRegex(line, r"^[A-Za-z0-9_.-]+==[0-9A-Za-z_.-]+$")
-        self.assertIn("pyinstaller==" + self.value["pyinstaller_version"], [line.casefold() for line in lines])
+        self.assertIn(
+            "pyinstaller==" + self.value["pyinstaller_version"],
+            [line.casefold() for line in lines],
+        )
 
     def test_build_scripts_accept_no_url_or_version_parameters(self):
         for filename in (
@@ -63,19 +78,24 @@ class PortableSupplyChainTests(unittest.TestCase):
             "verify_protocol_inventory.ps1",
             "verify_event_timeline.ps1",
             "verify_transaction_sessions.ps1",
+            "verify_device_sessions.ps1",
         ):
             text = (self.support / filename).read_text(encoding="utf-8")
             parameter_block = text.split(")", 1)[0]
             for forbidden in ("Url", "Uri", "Version", "Hash", "Installer"):
                 self.assertNotIn("$" + forbidden, parameter_block)
-        build_text = (self.support / "build_portable.ps1").read_text(encoding="utf-8")
+        build_text = (self.support / "build_portable.ps1").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("supply-chain.json", build_text)
         self.assertIn("Get-AuthenticodeSignature", build_text)
         self.assertIn("--windowed", build_text)
         self.assertIn("--onedir", build_text)
 
-    def test_finalize_requires_licenses_exact_executables_and_release_metadata(self):
-        text = (self.support / "finalize_portable.ps1").read_text(encoding="utf-8")
+    def test_finalize_requires_licenses_exact_executables_and_privacy_metadata(self):
+        text = (self.support / "finalize_portable.ps1").read_text(
+            encoding="utf-8"
+        )
         for value in (
             "PYTHON-LICENSE.txt",
             "TCL-LICENSE.txt",
@@ -88,10 +108,14 @@ class PortableSupplyChainTests(unittest.TestCase):
             "protocol_inventory_runtime",
             "event_timeline_runtime",
             "transaction_session_runtime",
+            "device_session_runtime",
+            "raw_identifier_serialization",
+            "alias_secret_persistence",
+            "cross_run_alias_stability",
         ):
             self.assertIn(value, text)
 
-    def test_portable_workflows_run_real_finding_timeline_and_transaction_gates(self):
+    def test_portable_workflows_run_all_real_analysis_and_privacy_gates(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -100,8 +124,11 @@ class PortableSupplyChainTests(unittest.TestCase):
             self.assertIn("verify_protocol_inventory.ps1", text)
             self.assertIn("verify_event_timeline.ps1", text)
             self.assertIn("verify_transaction_sessions.ps1", text)
+            self.assertIn("verify_device_sessions.ps1", text)
 
-        finding_verifier = (self.support / "verify_protocol_inventory.ps1").read_text(encoding="utf-8")
+        finding_verifier = (
+            self.support / "verify_protocol_inventory.ps1"
+        ).read_text(encoding="utf-8")
         for value in (
             "--analyze-capture",
             "frames_observed",
@@ -119,7 +146,9 @@ class PortableSupplyChainTests(unittest.TestCase):
         ):
             self.assertIn(value, finding_verifier)
 
-        timeline_verifier = (self.support / "verify_event_timeline.ps1").read_text(encoding="utf-8")
+        timeline_verifier = (
+            self.support / "verify_event_timeline.ps1"
+        ).read_text(encoding="utf-8")
         for value in (
             "generate_event_fixture.py",
             "generate_wireless_event_fixture.py",
@@ -137,7 +166,9 @@ class PortableSupplyChainTests(unittest.TestCase):
         ):
             self.assertIn(value, timeline_verifier)
 
-        transaction_verifier = (self.support / "verify_transaction_sessions.ps1").read_text(encoding="utf-8")
+        transaction_verifier = (
+            self.support / "verify_transaction_sessions.ps1"
+        ).read_text(encoding="utf-8")
         for value in (
             "transaction_session_runtime",
             "radius_access_request",
@@ -157,15 +188,56 @@ class PortableSupplyChainTests(unittest.TestCase):
         ):
             self.assertIn(value, transaction_verifier)
 
+        device_verifier = (
+            self.support / "verify_device_sessions.ps1"
+        ).read_text(encoding="utf-8")
+        for value in (
+            "device_session_runtime",
+            "raw_identifier_serialization",
+            "alias_secret_persistence",
+            "cross_run_alias_stability",
+            "DEVICE-1",
+            "AP-1",
+            "device_identity_confirmed",
+            "cross_protocol_session_confirmed",
+            "attempt_links",
+            "frames_ambiguous",
+        ):
+            self.assertIn(value, device_verifier)
+
     def test_event_fixtures_are_generated_at_runtime_not_committed(self):
-        ethernet = (self.support / "generate_event_fixture.py").read_text(encoding="utf-8")
-        wireless = (self.support / "generate_wireless_event_fixture.py").read_text(encoding="utf-8")
-        eap = (self.support / "generate_eap_fixture.py").read_text(encoding="utf-8")
-        for value in ("build_pcap", "_eapol", "_radius", "_dhcp", "_dns_response", "_tcp_frame"):
+        ethernet = (self.support / "generate_event_fixture.py").read_text(
+            encoding="utf-8"
+        )
+        wireless = (
+            self.support / "generate_wireless_event_fixture.py"
+        ).read_text(encoding="utf-8")
+        eap = (self.support / "generate_eap_fixture.py").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            "build_pcap",
+            "_eapol",
+            "_radius",
+            "_dhcp",
+            "_dns_response",
+            "_tcp_frame",
+        ):
             self.assertIn(value, ethernet)
-        for value in ("build_pcap", "_authentication", "_association_response", "_eapol_data", "_radiotap_header"):
+        for value in (
+            "build_pcap",
+            "_authentication",
+            "_association_response",
+            "_eapol_data",
+            "_radiotap_header",
+        ):
             self.assertIn(value, wireless)
-        for value in ("build_pcap", "PPP_EAP_PROTOCOL", "_eap_packet", "_ppp_eap"):
+        for value in (
+            "build_pcap",
+            "PPP_EAP_PROTOCOL",
+            "_eap_packet",
+            "_ppp_eap",
+        ):
             self.assertIn(value, eap)
         self.assertFalse(any(self.root.rglob("*.pcap")))
         self.assertFalse(any(self.root.rglob("*.pcapng")))
