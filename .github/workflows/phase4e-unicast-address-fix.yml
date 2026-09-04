@@ -1,0 +1,116 @@
+name: Phase 4E Unicast Address Fix
+
+on:
+  push:
+    branches:
+      - chatgpt/phase-4e-device-aliases
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase4e-unicast-address-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    name: Patch non-unicast address handling once
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: "1"
+      PYTHONPATH: src
+
+    steps:
+      - name: Check out Phase 4E branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chatgpt/phase-4e-device-aliases
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+          architecture: x64
+
+      - name: Add fail-closed non-unicast precheck to the MAC parser
+        shell: pwsh
+        run: |
+          @'
+          from __future__ import annotations
+
+          import ast
+          from pathlib import Path
+
+          path = Path("src/wlan_troubleshooter_ko/analysis/device_sessions.py")
+          text = path.read_text(encoding="utf-8")
+          marker = "PHASE4E_NON_UNICAST_PRECHECK"
+          if marker in text:
+              print("Non-unicast precheck is already present.")
+              raise SystemExit(0)
+
+          tree = ast.parse(text)
+          candidates = []
+          for node in tree.body:
+              if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                  continue
+              source = ast.get_source_segment(text, node) or ""
+              lowered_name = node.name.casefold()
+              if (
+                  ("mac" in lowered_name or "address" in lowered_name)
+                  and "DeviceSessionError" in source
+                  and ("fromhex" in source or "split" in source or "casefold" in source)
+                  and node.args.args
+              ):
+                  candidates.append(node)
+
+          if len(candidates) != 1:
+              raise SystemExit(
+                  "Expected exactly one MAC parser candidate, found " + str(len(candidates))
+              )
+
+          node = candidates[0]
+          value_name = node.args.args[0].arg
+          lines = text.splitlines(keepends=True)
+          insert_line = node.body[0].end_lineno if (
+              node.body
+              and isinstance(node.body[0], ast.Expr)
+              and isinstance(node.body[0].value, ast.Constant)
+              and isinstance(node.body[0].value.value, str)
+          ) else node.lineno
+          indent = " " * (node.col_offset + 4)
+          snippet = [
+              indent + "# PHASE4E_NON_UNICAST_PRECHECK: broadcast/multicast is not a device identity.\n",
+              indent + "if isinstance(" + value_name + ", str) and " + value_name + ".strip():\n",
+              indent + "    _phase4e_compact = " + value_name + ".strip().replace(':', '').replace('-', '').replace('.', '')\n",
+              indent + "    if len(_phase4e_compact) == 12 and all(character in '0123456789abcdefABCDEF' for character in _phase4e_compact):\n",
+              indent + "        _phase4e_octets = bytes.fromhex(_phase4e_compact)\n",
+              indent + "        if _phase4e_octets == b'\\xff' * 6 or (_phase4e_octets[0] & 1):\n",
+              indent + "            return None\n",
+          ]
+          lines[insert_line:insert_line] = snippet
+          path.write_text("".join(lines), encoding="utf-8", newline="\n")
+          print("Patched function:", node.name)
+          '@ | Set-Content -LiteralPath $env:RUNNER_TEMP\phase4e_patch.py -Encoding utf8
+          python $env:RUNNER_TEMP\phase4e_patch.py
+
+      - name: Run focused and complete offline validation
+        shell: pwsh
+        run: |
+          python -m unittest tests.test_device_sessions tests.test_app
+          ./scripts/verify_offline.ps1 -PythonPath python
+
+      - name: Commit generated source fix
+        shell: pwsh
+        run: |
+          if (-not (git status --porcelain)) {
+              Write-Host "No source change was necessary."
+              exit 0
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/wlan_troubleshooter_ko/analysis/device_sessions.py
+          git commit -m "브로드캐스트·멀티캐스트 L2 주소를 단말 후보에서 제외"
+          git push origin HEAD:chatgpt/phase-4e-device-aliases
