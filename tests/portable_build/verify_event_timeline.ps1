@@ -133,6 +133,8 @@ $EthernetCapture = Join-Path $WorkRoot "private-event-integration-capture.pcap"
 $EthernetOutput = Join-Path $WorkRoot "ethernet-analysis-result.json"
 $WirelessCapture = Join-Path $WorkRoot "private-wireless-event-capture.pcap"
 $WirelessOutput = Join-Path $WorkRoot "wireless-analysis-result.json"
+$EapCapture = Join-Path $WorkRoot "private-eap-event-capture.pcap"
+$EapOutput = Join-Path $WorkRoot "eap-analysis-result.json"
 New-Item -ItemType Directory -Path $Expanded -Force | Out-Null
 try {
     Expand-Archive -LiteralPath $Archive -DestinationPath $Expanded
@@ -153,6 +155,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $WirelessCapture -PathType Leaf)) {
         throw "Synthetic Portable wireless event capture generation failed."
     }
+    & $PythonPath (Join-Path $PSScriptRoot "generate_eap_fixture.py") --output $EapCapture
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $EapCapture -PathType Leaf)) {
+        throw "Synthetic Portable EAP event capture generation failed."
+    }
 
     $BeforeFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
         [System.IO.Path]::GetRelativePath($Expanded, $_.FullName).Replace("\", "/")
@@ -168,6 +174,7 @@ try {
         $Application = Join-Path $Expanded "WlanTroubleshooterKO.exe"
         Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $EthernetCapture -Output $EthernetOutput
         Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $WirelessCapture -Output $WirelessOutput
+        Invoke-PortableAnalysis -Application $Application -WorkingDirectory $Expanded -Capture $EapCapture -Output $EapOutput
     }
     finally {
         $env:PATH = $OldPath
@@ -241,9 +248,7 @@ try {
         "wlan_auth_response_success",
         "wlan_assoc_request",
         "wlan_assoc_response_success",
-        "eap_request",
-        "eap_response",
-        "eap_success",
+        "eapol_packet",
         "wlan_deauthentication"
     ) -Label "Wireless event type"
 
@@ -251,14 +256,9 @@ try {
     foreach ($Stage in $WirelessResult.protocol_inventory.event_timeline.stages) {
         $WirelessStages[[string]$Stage.stage_id] = [string]$Stage.state
     }
-    foreach ($StageId in @("wlan-management", "eap")) {
-        if ($WirelessStages[$StageId] -ne "success-observed") {
-            throw "Expected wireless success-observed stage was not produced: $StageId"
-        }
+    if ($WirelessStages["wlan-management"] -ne "success-observed") {
+        throw "Expected wireless management success-observed stage was not produced."
     }
-
-    $WirelessAliases = @($WirelessResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.correlation_alias } | Where-Object { $_ })
-    Assert-ContainsAll -Observed $WirelessAliases -Expected @("EAP-1") -Label "Wireless correlation alias"
 
     Assert-NoForbiddenText -Raw $WirelessRaw -Forbidden @(
         $WirelessCapture,
@@ -267,7 +267,43 @@ try {
         "0200000000b1",
         "02:00:00:00:00:a1",
         "02:00:00:00:00:b1",
+        "synthetic-user",
         "1700000100"
+    )
+
+    $EapAnalysis = Read-CompletedAnalysis -Output $EapOutput -ExpectedFrames 3
+    $EapResult = $EapAnalysis.Result
+    $EapRaw = $EapAnalysis.Raw
+
+    $EapGroups = @($EapResult.protocol_inventory.inventory.observations | ForEach-Object { $_.group_id })
+    Write-Host ("PPP EAP protocol groups: " + ($EapGroups -join ", "))
+    Assert-ContainsAll -Observed $EapGroups -Expected @("eap") -Label "PPP EAP protocol group"
+
+    $EapEventTypes = @($EapResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.event_type })
+    Write-Host ("PPP EAP event types: " + ($EapEventTypes -join ", "))
+    Assert-ContainsAll -Observed $EapEventTypes -Expected @(
+        "eap_request",
+        "eap_response",
+        "eap_success"
+    ) -Label "PPP EAP event type"
+
+    $EapStages = @{}
+    foreach ($Stage in $EapResult.protocol_inventory.event_timeline.stages) {
+        $EapStages[[string]$Stage.stage_id] = [string]$Stage.state
+    }
+    if ($EapStages["eap"] -ne "success-observed") {
+        throw "Expected PPP EAP success-observed stage was not produced."
+    }
+
+    $EapAliases = @($EapResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.correlation_alias } | Where-Object { $_ })
+    Assert-ContainsAll -Observed $EapAliases -Expected @("EAP-1") -Label "PPP EAP correlation alias"
+
+    Assert-NoForbiddenText -Raw $EapRaw -Forbidden @(
+        $EapCapture,
+        (Split-Path -Leaf $EapCapture),
+        "synthetic-user",
+        "1700000200",
+        "0xc227"
     )
 
     $AfterFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
@@ -276,7 +312,7 @@ try {
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
         throw "Portable event analysis modified its distribution directory."
     }
-    Write-Host "Portable Ethernet and Radiotap IEEE 802.11 event timeline integration tests passed."
+    Write-Host "Portable Ethernet, Radiotap IEEE 802.11, and PPP EAP integration tests passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
