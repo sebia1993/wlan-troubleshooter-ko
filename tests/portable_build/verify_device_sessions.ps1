@@ -161,8 +161,13 @@ try {
     }
 
     Assert-PrivacyFlags -Report $Ethernet.Report
-    if ($Ethernet.Report.complete -ne $true -or $Ethernet.Report.devices_total -ne 1) {
-        throw "Ethernet device-alias report did not produce one complete DEVICE alias."
+    if (
+        $Ethernet.Report.complete -ne $true -or
+        $Ethernet.Report.devices_total -ne 1 -or
+        $Ethernet.Report.frames_ambiguous -ne 0 -or
+        $Ethernet.Report.attempts_ambiguous -ne 0
+    ) {
+        throw "Ethernet device-alias report is incomplete or ambiguous."
     }
     $EthernetDevice = @($Ethernet.Report.devices)[0]
     if (
@@ -197,8 +202,13 @@ try {
     )
 
     Assert-PrivacyFlags -Report $Wireless.Report
-    if ($Wireless.Report.complete -ne $true -or $Wireless.Report.devices_total -ne 1) {
-        throw "Wireless device-alias report did not produce one complete DEVICE alias."
+    if (
+        $Wireless.Report.complete -ne $true -or
+        $Wireless.Report.devices_total -ne 1 -or
+        $Wireless.Report.frames_ambiguous -ne 0 -or
+        $Wireless.Report.attempts_ambiguous -ne 0
+    ) {
+        throw "Wireless device-alias report is incomplete or ambiguous."
     }
     $WirelessDevice = @($Wireless.Report.devices)[0]
     if (
