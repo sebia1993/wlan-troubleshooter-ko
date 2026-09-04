@@ -58,13 +58,14 @@ jobs:
               throw "PyInstaller version does not match the pinned supply-chain value."
           }
 
-      - name: Build, finalize, and verify Python-free Portable package
+      - name: Build, diagnose, and verify Python-free Portable package
         shell: pwsh
         run: |
           $Output = Join-Path $env:RUNNER_TEMP "portable-output"
           $Package = Join-Path $Output "package-output.json"
           ./tests/portable_build/build_portable.ps1 -Mode Build -PythonPath python -OutputDirectory $Output
           ./tests/portable_build/finalize_portable.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/inspect_eap_runtime.ps1 -PackageOutputPath $Package -PythonPath python
           ./tests/portable_build/verify_protocol_inventory.ps1 -PackageOutputPath $Package -PythonPath python
           ./tests/portable_build/verify_event_timeline.ps1 -PackageOutputPath $Package -PythonPath python
           Get-Content -LiteralPath $Package
