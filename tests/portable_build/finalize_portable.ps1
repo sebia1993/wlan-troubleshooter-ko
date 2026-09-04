@@ -150,6 +150,7 @@ try {
         device_session_runtime = "enabled"
         device_journey_runtime = "enabled"
         capture_observability_runtime = "enabled"
+        eapol_handshake_runtime = "enabled"
         raw_identifier_serialization = "disabled"
         alias_secret_persistence = "disabled"
         cross_run_alias_stability = "disabled"
