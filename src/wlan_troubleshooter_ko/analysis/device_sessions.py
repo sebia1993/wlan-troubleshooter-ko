@@ -288,6 +288,13 @@ def _parse_epoch_microseconds(value: str) -> int:
 
 
 def _normalize_mac(value: str, label: str) -> Optional[bytes]:
+    # PHASE4E_NON_UNICAST_PRECHECK: broadcast/multicast is not a device identity.
+    if isinstance(value, str) and value.strip():
+        _phase4e_compact = value.strip().replace(':', '').replace('-', '').replace('.', '')
+        if len(_phase4e_compact) == 12 and all(character in '0123456789abcdefABCDEF' for character in _phase4e_compact):
+            _phase4e_octets = bytes.fromhex(_phase4e_compact)
+            if _phase4e_octets == b'\xff' * 6 or (_phase4e_octets[0] & 1):
+                return None
     raw = value.strip()
     if not raw:
         return None
