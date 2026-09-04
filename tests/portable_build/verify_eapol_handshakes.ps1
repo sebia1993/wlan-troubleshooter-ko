@@ -39,7 +39,9 @@ function Assert-NoForbiddenText {
 function Assert-ExactIntegerSequence {
     param(
         [Parameter(Mandatory = $true)]$Actual,
-        [Parameter(Mandatory = $true)][int[]]$Expected,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [int[]]$Expected,
         [Parameter(Mandatory = $true)][string]$Label
     )
 
