@@ -4,14 +4,17 @@
 
 ## 현재 범위
 
-사용자는 2026년 9월 4일 남은 개발을 계속하도록 승인했습니다. 현재 범위는 `docs/PHASE_4D_PLAN.md`의 **비식별 프로토콜 거래 시도 요약**입니다.
+사용자는 2026년 9월 4일 남은 개발을 계속하도록 승인했습니다. 현재 범위는 `docs/PHASE_4E_PLAN.md`와 ADR 0004의 **분석 실행별 단말·AP 가명화**입니다.
 
-- Phase 4C 타임라인의 `EAP-N`, `RADIUS-N`, `DHCP-N`, `DNS-N`, `TCP-N` 별칭을 프로토콜 거래 시도별로 묶습니다.
-- 요청·중간 이벤트·명시적 성공·실패 응답의 순서와 미관찰 요소를 표시합니다.
-- 같은 별칭이 종료 응답 뒤 재사용되면 `A1`, `A2` 시도 번호로 분리합니다.
-- 거래 완료·실패는 해당 프로토콜 이벤트 관찰 결과로만 표현합니다.
-- 서로 다른 프로토콜 거래를 동일 단말 접속으로 자동 연결하지 않습니다.
-- 단말별 익명 세션, 로밍·RF 근본 원인과 HTML 보고서는 다음 단계로 남깁니다.
+- 기존 공개 `connection-events` 출력에는 원본 MAC·BSSID를 추가하지 않습니다.
+- 전용 `device-identities` 프로파일에서만 최소 L2 주소를 읽습니다.
+- 원문 주소는 분석 실행별 HMAC 키로 즉시 가명화하고 결과에는 `DEVICE-N`·`AP-N`만 남깁니다.
+- 비밀키·원문 주소·HMAC digest·대응표를 저장하거나 로그에 남기지 않습니다.
+- 실행 간 별칭을 안정적으로 재사용하지 않습니다.
+- 단말 방향 근거가 명확할 때만 새 `DEVICE-N`을 만듭니다.
+- 둘 이상의 단말 근거가 있으면 모호함으로 남기고 자동 연결하지 않습니다.
+- 서로 다른 프로토콜 거래가 같은 단말에 연결돼도 전체 접속 하나로 확정하지 않습니다.
+- 접속 시간 구간·4-Way Handshake·로밍·RF·HTML 보고서는 다음 단계로 남깁니다.
 - 가짜 패킷 결과, 임시 성공값과 근거 없는 원인을 만들지 않습니다.
 
 ## 기술과 런타임 금지사항
@@ -34,76 +37,97 @@
 - stderr 원문은 저장·표시하지 않습니다.
 - 호출마다 빈 config·plugin·extcap·data·temp 경로를 만들고 종료 후 무잔류를 확인합니다.
 
-## Phase 4D 입력과 개인정보 경계
+## 공개 분석 프로파일
 
-거래 시도 분석기는 Phase 4C가 만든 다음 값만 사용합니다.
+`protocol-inventory`와 `connection-events`에는 IP·MAC·SSID·사용자명·DNS 질의명·포트·Payload 필드를 넣지 않습니다. 이 프로파일의 결과는 기존 비식별 JSON·GUI에 사용됩니다.
+
+## Phase 4E 전용 가명화 프로파일
+
+원본 L2 식별자는 `device-identities` 프로파일에서만 허용합니다.
+
+허용 필드:
 
 ```text
-correlation_alias
-frame_number
-relative_time_ms
-event_type
+eth.src
+eth.dst
+wlan.sa
+wlan.da
+wlan.bssid
 ```
 
-다음 값은 GUI·기본 JSON·로그와 거래 시도 모델에 기록하지 않습니다.
+금지 필드:
 
-- IPv4·IPv6 주소
-- Ethernet·802.11 MAC 주소
-- SSID·BSSID
-- 사용자명·EAP Identity·RADIUS User-Name
-- DNS 질의명·호스트명
-- TCP·UDP 포트
-- 원본 EAP·RADIUS·DHCP·DNS 거래 ID
-- 원본 TCP·UDP Stream 번호
-- 절대 epoch
-- Raw Payload·파일·쿠키·Authorization·자격 증명
-- 원본 캡처 파일명·절대경로
-- TShark 표준 오류 원문
+```text
+ip.src·ip.dst·ipv6.src·ipv6.dst
+wlan.ssid
+EAP Identity·RADIUS User-Name
+DNS 질의명·호스트명
+TCP·UDP 포트
+Raw Payload·파일·쿠키·Authorization·자격 증명
+```
 
-거래 별칭은 캡처 내부에서만 사용하는 순번이며 단말이나 사용자의 신원을 의미하지 않습니다.
+전용 프로파일도 공개 분석과 동일한 고정 argv·격리·무결성·취소·출력 상한을 적용합니다. 일반 `assert_safe_profile_argv` 호출은 원본 L2 필드를 거부해야 하며, 명시적인 `device-identities` 프로파일 문맥에서만 허용합니다.
+
+## 가명화 키와 메모리 경계
+
+- 분석 실행마다 CSPRNG 기반 32바이트 비밀키를 생성합니다.
+- 정규화한 L2 주소를 HMAC-SHA-256 입력으로 사용합니다.
+- 단말과 AP는 서로 다른 HMAC 도메인을 사용합니다.
+- 내부 장기 구조에는 HMAC digest와 순번 가명만 보관합니다.
+- 원문 주소·HMAC digest·비밀키·대응표를 결과·로그·파일·환경변수·레지스트리에 기록하지 않습니다.
+- 결과에는 `raw_identifiers_serialized=false`, `alias_secret_persisted=false`, `aliases_stable_across_runs=false`를 유지합니다.
+
+원문 주소는 TShark stdout과 Python 파싱 메모리에 일시적으로 존재할 수 있습니다. 메모리 덤프까지 포함한 완전 비노출을 주장하지 않으며, 디스크·로그·보고서·외부 전송 비노출만 현재 보장합니다.
+
+## 단말 최초 등록과 연결
+
+다음 근거만 새 `DEVICE-N` 생성에 사용할 수 있습니다.
+
+- 802.11 Authentication·Association·Reassociation 요청·응답 방향
+- BSSID를 제외한 802.11 EAP/EAPOL Supplicant 주소
+- Ethernet EAP Request·Response·Success·Failure 방향
+- EAPOL Start·Logoff 송신자
+- DHCP Discover·Request·Decline·Release·Inform 송신자
+
+일반 DNS·TCP·TLS·ARP 주소만으로는 새 단말을 만들지 않습니다. 이미 확인된 단말 주소가 프레임에 정확히 하나 있을 때만 해당 프레임을 단말에 할당합니다.
 
 ## 판정 안전성
 
-- EAP 완료는 Request → Response → Success가 순서대로 관찰된 경우만 표시합니다.
-- RADIUS 완료는 Access-Request → Access-Accept가 관찰된 경우만 표시합니다.
-- DHCP 완료는 Discover → Offer → Request → ACK가 관찰된 경우만 표시합니다.
-- DNS 완료는 Query → 정상 Response가 관찰된 경우만 표시합니다.
-- TCP는 최종 ACK를 구분하지 않으므로 SYN → SYN/ACK가 있어도 3-Way Handshake 완료로 표시하지 않습니다.
-- Failure·Reject·NAK·DNS 오류·RST는 해당 실패 이벤트 관찰로 표시하되 근본 원인을 확정하지 않습니다.
-- 모든 거래 시도는 `root_cause_confirmed=false`, `device_session_confirmed=false`를 유지합니다.
-- 거래 미완료를 서버·방화벽·ClearPass 장애로 확정하지 않습니다.
-- 프로토콜별 거래를 서로 연결해 동일 단말 접속으로 단정하지 않습니다.
-- 성공과 실패가 함께 있으면 혼재로 표시합니다.
-- TCP 재전송만으로 RF 장애나 서버 장애를 확정하지 않습니다.
+- 브로드캐스트·멀티캐스트·전부 0인 주소를 단말로 만들지 않습니다.
+- 한 프레임에 확인된 단말이 둘 이상 있으면 `ambiguous`로 남깁니다.
+- 거래 근거 프레임이 둘 이상의 단말을 가리키면 해당 거래를 단말에 연결하지 않습니다.
+- RADIUS처럼 단말 L2 주소가 없는 트래픽은 시간만으로 연결하지 않습니다.
+- 모든 단말은 `device_identity_confirmed=false`, `cross_protocol_session_confirmed=false`를 유지합니다.
+- 같은 `DEVICE-N`에 여러 거래가 보여도 사용자 접속 전체나 근본 원인을 확정하지 않습니다.
+- 실행 간 같은 `DEVICE-1`을 같은 단말로 비교하지 않습니다.
+- TCP 재전송만으로 RF·서버 장애를 확정하지 않습니다.
 - 패킷 부재와 프로토콜 미관찰을 장애로 해석하지 않습니다.
 - Radiotap이 없으면 RSSI·SNR·채널을 판단하지 않습니다.
-- 근거가 부족하면 `판단 불가`가 우선입니다.
+- 근거가 부족하면 미할당·모호함·판단 불가가 우선입니다.
 
 ## 결과와 자원 제한
 
-- 시도별 첫·마지막 프레임, 상대 지속시간, 관찰·미관찰 이벤트와 `frame.number` 근거 필터를 제공합니다.
-- 거래 별칭은 최대 50,000개까지 허용합니다.
-- 한 거래 시도의 이벤트는 최대 200,000개까지 허용합니다.
-- 거래 시도별 근거 프레임은 최대 64개를 표시하고 초과 수를 기록합니다.
-- 타임라인 이벤트가 생략되거나 캡처가 일부이면 거래 보고서를 일부 결과로 표시합니다.
-- 별칭·프로토콜·프레임·시간·개수가 규칙과 다르면 실패-폐쇄 처리합니다.
+- 전용 프로파일 처리 상한: 100,000프레임
+- 단말 가명: 최대 20,000개
+- AP 가명: 최대 20,000개
+- 거래 연결: 최대 50,000개
+- 단말별 근거 프레임: 최대 64개
+- 기존 이벤트·거래·stdout·stderr·실행시간 상한 유지
 
 ## 검증과 릴리즈
 
-변경 후 Windows에서 바이트코드 컴파일, 전체 테스트, 자체 점검, 소스 감사, 저장소 감사, Portable 빌드와 실제 내장 TShark 통합 검증을 수행합니다.
+변경 후 Windows에서 바이트코드 컴파일, 전체 테스트, 자체 점검, 소스 감사, 저장소 감사, Portable 빌드와 실제 내장 TShark 검증을 수행합니다.
 
-Portable 검증은 Python PATH 없이 최종 EXE를 실행하고 다음 거래를 실제 패킷에서 확인해야 합니다.
+Portable 검증은 Python PATH 없이 최종 EXE를 실행하고 다음을 확인해야 합니다.
 
-- PPP EAP Request → Response → Success 완료
-- RADIUS Access-Request → Access-Accept 완료
-- DHCP Discover → Offer → Request → ACK 완료
-- DNS Query → 정상 Response 완료
-- DNS 오류 Response 실패 결과
-- TCP SYN → SYN/ACK 성공 방향 응답이지만 완료로 과장하지 않음
-- TCP RST 실패 결과
+- Ethernet DHCP 근거에서 `DEVICE-1` 생성
+- 같은 단말의 DHCP·DNS·TCP 거래 연결
+- 일반 DNS·TCP 서버 주소를 새 단말로 만들지 않음
+- IEEE 802.11 Station과 BSSID를 `DEVICE-1`·`AP-1`로 분리
+- 원문 L2 주소·IP·DNS 질의명·원본 ID·절대 시간 비노출
+- 가명화 키·대응표 미저장
+- 분석 전후 Portable 폴더 무변경
 
-모든 거래의 근본 원인·단말 세션 확정 값이 `false`이고, 결과에 경로·파일명·IP·MAC·원본 ID·절대 시간이 없으며 배포 폴더가 변경되지 않아야 합니다.
-
-`v0.7.0-alpha.1`은 비식별 프로토콜 거래 시도 프리릴리즈입니다. 단일 단말의 완전한 WLAN 근본 원인 분석기로 표현하지 않으며 애플리케이션 상용 코드 서명이 없음을 명시합니다.
+`v0.8.0-alpha.1`은 분석 실행별 단말·AP 가명 프리릴리즈입니다. 실제 사용자 신원, 자산 식별 또는 완전한 단말 접속 분석기로 표현하지 않으며 애플리케이션 상용 코드 서명이 없음을 명시합니다.
 
 외부 프로젝트의 소스·테스트·문장·이미지·자산을 복사하지 않습니다. 제3자 구성요소가 바뀌면 `THIRD_PARTY_NOTICES.md`, 공급망 고정값, 대응 소스와 라이선스를 먼저 갱신합니다.
