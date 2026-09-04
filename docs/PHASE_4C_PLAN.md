@@ -104,8 +104,9 @@ Finding과 타임라인을 위해 캡처를 각각 다시 실행하지 않습니
 
 최종 ZIP을 압축 해제하고 Python 환경변수와 일반 Python PATH를 제거한 상태에서 `WlanTroubleshooterKO.exe`를 실행합니다.
 
-- 합성 Ethernet 16프레임: EAP·RADIUS·DHCP·DNS·ARP·TCP 이벤트
+- 합성 Ethernet 16프레임: EAPOL 외피·RADIUS·DHCP·DNS·ARP·TCP 이벤트
 - 합성 IEEE 802.11 8프레임: 인증·Association·EAP·Deauthentication 이벤트
+- EAP Request·Response·Success는 실제 무선 데이터 프레임의 EAPOL/EAP 구조에서 검증
 - 결과 경로·파일명·IP·MAC·원본 거래 ID·절대 epoch 비노출
 - 분석 전후 Portable 폴더 무변경
 
