@@ -714,3 +714,43 @@ def build_device_sessions(
         aliases_stable_across_runs=False,
         cautions=tuple(cautions),
     )
+
+# PHASE4E_NON_UNICAST_TSV_SANITIZER
+# A broadcast or multicast destination is protocol context, not a device identity.
+_PHASE4E_MAC_TOKEN = re.compile(
+    r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f])"
+)
+_phase4e_original_build_device_sessions = build_device_sessions
+
+
+def _phase4e_remove_nonunicast_mac_tokens(text: str) -> str:
+    if not isinstance(text, str):
+        raise DeviceSessionError("단말 식별 필드 출력은 텍스트여야 합니다.")
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        first_octet = int(token[0:2], 16)
+        if token.casefold() == "ff:ff:ff:ff:ff:ff" or first_octet & 1:
+            return ""
+        return token
+
+    return _PHASE4E_MAC_TOKEN.sub(replace, text)
+
+
+def build_device_sessions(
+    text: str,
+    profile,
+    transaction_sessions,
+    *args,
+    **kwargs,
+):
+    """Ignore valid non-unicast L2 cells before transient device pseudonymization."""
+
+    return _phase4e_original_build_device_sessions(
+        _phase4e_remove_nonunicast_mac_tokens(text),
+        profile,
+        transaction_sessions,
+        *args,
+        **kwargs,
+    )
+
