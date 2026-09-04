@@ -60,6 +60,13 @@ TRANSIENT_IDENTITY_FIELDS = (
     "wlan.bssid",
 )
 
+# The raw 64-bit Replay Counter may appear only in the dedicated relation
+# profile. Product models may serialize equality/ordering relations, never the
+# counter value itself.
+TRANSIENT_EAPOL_RELATION_FIELDS = (
+    "eapol.keydes.replay_counter",
+)
+
 _PROFILE_REQUIRED_FIELDS = {
     "protocol-inventory": {
         "frame.number",
@@ -79,6 +86,9 @@ _PROFILE_REQUIRED_FIELDS = {
         "frame.time_epoch",
         "frame.protocols",
     },
+    "eapol-replay-relations": {
+        "frame.number",
+    },
 }
 
 _DEVICE_IDENTITY_FIELD_ORDER = (
@@ -94,10 +104,17 @@ _DEVICE_IDENTITY_FIELD_ORDER = (
     *TRANSIENT_IDENTITY_FIELDS,
 )
 
+_EAPOL_REPLAY_RELATION_FIELD_ORDER = (
+    "frame.number",
+    "wlan_rsna_eapol.keydes.msgnr",
+    *TRANSIENT_EAPOL_RELATION_FIELDS,
+)
+
 _PROFILE_FIELD_ORDER = {
     "protocol-inventory": APPROVED_FIELDS,
     "connection-events": APPROVED_FIELDS,
     "device-identities": _DEVICE_IDENTITY_FIELD_ORDER,
+    "eapol-replay-relations": _EAPOL_REPLAY_RELATION_FIELD_ORDER,
 }
 
 _FIELD_OUTPUT_PREFIX = [
@@ -253,6 +270,10 @@ def _infer_non_identity_profile(fields: Sequence[str]) -> str:
     if any(field in TRANSIENT_IDENTITY_FIELDS for field in fields):
         raise TSharkPolicyError(
             "가명화 필드는 명시적인 device-identities 프로파일에서만 사용할 수 있습니다."
+        )
+    if any(field in TRANSIENT_EAPOL_RELATION_FIELDS for field in fields):
+        raise TSharkPolicyError(
+            "Replay Counter 원문은 명시적인 eapol-replay-relations 프로파일에서만 사용할 수 있습니다."
         )
     return "connection-events" if "frame.time_epoch" in fields else "protocol-inventory"
 

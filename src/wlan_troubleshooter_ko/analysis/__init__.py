@@ -1,4 +1,4 @@
-"""결정론적 캡처 점검부터 EAPOL-Key 순서 관찰까지의 공개 API."""
+"""결정론적 캡처 점검부터 EAPOL 관계 분석까지의 공개 API."""
 
 from wlan_troubleshooter_ko.analysis.capture_observability import (
     CaptureObservabilityError,
@@ -35,6 +35,13 @@ from wlan_troubleshooter_ko.analysis.eapol_handshakes import (
     EapolHandshakeObservation,
     EapolHandshakeReport,
     build_eapol_handshakes,
+)
+from wlan_troubleshooter_ko.analysis.eapol_replay_relations import (
+    EapolReplayRelationError,
+    EapolReplayRelationObservation,
+    EapolReplayRelationReport,
+    RepeatedCounterRelation,
+    build_eapol_replay_relations,
 )
 from wlan_troubleshooter_ko.analysis.event_correlation import (
     DiagnosticFinding,
@@ -99,6 +106,9 @@ __all__ = [
     "EapolHandshakeError",
     "EapolHandshakeObservation",
     "EapolHandshakeReport",
+    "EapolReplayRelationError",
+    "EapolReplayRelationObservation",
+    "EapolReplayRelationReport",
     "EventCorrelation",
     "EventCorrelationError",
     "EventTimeline",
@@ -111,6 +121,7 @@ __all__ = [
     "ProtocolInventoryError",
     "ProtocolObservation",
     "ProtocolVisibility",
+    "RepeatedCounterRelation",
     "StageAssessment",
     "StageSummary",
     "TransactionAttempt",
@@ -121,6 +132,7 @@ __all__ = [
     "build_device_journeys",
     "build_device_sessions",
     "build_eapol_handshakes",
+    "build_eapol_replay_relations",
     "build_event_correlation",
     "build_event_timeline",
     "build_protocol_inventory",
