@@ -136,14 +136,14 @@ def _run_noninteractive_analysis(capture_path: str, output_path: str) -> int:
         exit_code = 0 if result.inventory_state == "completed" else 2
     except CaptureAnalysisError as exc:
         payload = {
-            "schema_version": 3,
+            "schema_version": 2,
             "protocol_inventory_state": "failed",
             "protocol_inventory_message": str(exc),
         }
         exit_code = 2
     except Exception:
         payload = {
-            "schema_version": 3,
+            "schema_version": 2,
             "protocol_inventory_state": "failed",
             "protocol_inventory_message": "캡처 분석을 안전하게 완료하지 못했습니다.",
         }
