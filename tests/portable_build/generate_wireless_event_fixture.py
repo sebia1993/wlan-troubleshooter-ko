@@ -13,13 +13,21 @@ STATION = bytes.fromhex("0200000000a1")
 ACCESS_POINT = bytes.fromhex("0200000000b1")
 
 
-def _management_header(subtype: int, destination: bytes, source: bytes, bssid: bytes, sequence: int) -> bytes:
+def _management_header(
+    subtype: int,
+    destination: bytes,
+    source: bytes,
+    bssid: bytes,
+    sequence: int,
+) -> bytes:
     frame_control = (subtype & 0xF) << 4
-    return struct.pack("<HH", frame_control, 0)
-    + destination
-    + source
-    + bssid
-    + struct.pack("<H", (sequence & 0xFFF) << 4)
+    return (
+        struct.pack("<HH", frame_control, 0)
+        + destination
+        + source
+        + bssid
+        + struct.pack("<H", (sequence & 0xFFF) << 4)
+    )
 
 
 def _authentication(request: bool, sequence: int) -> bytes:
@@ -46,13 +54,20 @@ def _association_response(sequence: int) -> bytes:
     return header + body
 
 
-def _data_header(destination: bytes, source: bytes, bssid: bytes, sequence: int) -> bytes:
+def _data_header(
+    destination: bytes,
+    source: bytes,
+    bssid: bytes,
+    sequence: int,
+) -> bytes:
     frame_control = 2 << 2
-    return struct.pack("<HH", frame_control, 0)
-    + destination
-    + source
-    + bssid
-    + struct.pack("<H", (sequence & 0xFFF) << 4)
+    return (
+        struct.pack("<HH", frame_control, 0)
+        + destination
+        + source
+        + bssid
+        + struct.pack("<H", (sequence & 0xFFF) << 4)
+    )
 
 
 def _eap_packet(code: int, identifier: int, eap_type: int | None = None) -> bytes:
@@ -60,7 +75,13 @@ def _eap_packet(code: int, identifier: int, eap_type: int | None = None) -> byte
     return struct.pack("!BBH", code, identifier, 4 + len(body)) + body
 
 
-def _eapol_data(request: bool, code: int, identifier: int, sequence: int, eap_type: int | None) -> bytes:
+def _eapol_data(
+    request: bool,
+    code: int,
+    identifier: int,
+    sequence: int,
+    eap_type: int | None,
+) -> bytes:
     source = ACCESS_POINT if request else STATION
     destination = STATION if request else ACCESS_POINT
     packet = _eap_packet(code, identifier, eap_type)
@@ -89,7 +110,13 @@ def build_pcap() -> bytes:
     output = bytearray(bytes.fromhex("d4c3b2a1"))
     output += struct.pack("<HHiIII", 2, 4, 0, 0, 65535, 105)
     for timestamp, frame in frames():
-        output += struct.pack("<IIII", 1_700_000_100 + timestamp, timestamp * 1000, len(frame), len(frame))
+        output += struct.pack(
+            "<IIII",
+            1_700_000_100 + timestamp,
+            timestamp * 1000,
+            len(frame),
+            len(frame),
+        )
         output += frame
     return bytes(output)
 
