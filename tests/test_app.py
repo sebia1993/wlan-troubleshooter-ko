@@ -17,19 +17,22 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "4D")
+        self.assertEqual(result["phase"], "4E")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["ruleset_version"], "0.2.0")
         self.assertEqual(result["rule_count"], "11")
-        self.assertEqual(result["field_profile_version"], "0.4.0")
+        self.assertEqual(result["field_profile_version"], "0.5.0")
         self.assertEqual(result["inventory_field_count"], "5")
         self.assertEqual(result["event_field_count"], "32")
+        self.assertEqual(result["identity_field_count"], "13")
         self.assertEqual(result["transaction_session_schema_version"], "1")
+        self.assertEqual(result["device_session_schema_version"], "1")
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
-        self.assertIn("거래 시도", result["analysis_features"])
+        self.assertIn("단말·AP 가명", result["analysis_features"])
+        self.assertIn("HMAC 키 미저장", result["identity_privacy"])
 
     def test_self_check_can_write_new_local_json_for_windowed_exe(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -39,8 +42,9 @@ class AppSmokeTests(unittest.TestCase):
             value = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(value["network_features"], "없음")
             self.assertEqual(value["python_external_required"], "true")
-            self.assertEqual(value["phase"], "4D")
-            self.assertEqual(value["transaction_session_schema_version"], "1")
+            self.assertEqual(value["phase"], "4E")
+            self.assertEqual(value["identity_field_count"], "13")
+            self.assertEqual(value["device_session_schema_version"], "1")
             with self.assertRaises(FileExistsError):
                 main(["--self-check-output=" + str(output)])
 
