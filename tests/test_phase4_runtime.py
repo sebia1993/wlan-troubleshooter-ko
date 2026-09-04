@@ -30,8 +30,8 @@ FIELDS_TEXT = """"frame.number"\t"frame.interface_id"\t"frame.cap_len"\t"frame.l
 "2"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
 """
 EVENT_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"
-"1"\t"1.000000000"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
-"2"\t"2.000000000"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
+"1"\t"1700000000.000000000"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
+"2"\t"1700000001.000000000"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
 """
 
 
@@ -198,7 +198,7 @@ class Phase4RuntimeTests(unittest.TestCase):
         )
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
-    def test_service_returns_identifier_free_inventory_and_stage_summary(self, popen):
+    def test_service_returns_identifier_free_inventory_stage_and_timeline(self, popen):
         root, vendor, capture, _workspace = self.setup_paths()
         popen.side_effect = [
             FakeProcess(CATALOG_TEXT.encode("utf-8")),
@@ -216,10 +216,12 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertEqual(result.inventory_state, "completed")
         self.assertIsNotNone(result.protocol_inventory)
         self.assertIsNotNone(result.protocol_inventory.event_correlation)
+        self.assertIsNotNone(result.protocol_inventory.event_timeline)
         text = json.dumps(serialized, ensure_ascii=False)
         self.assertNotIn(str(capture), text)
         self.assertNotIn(capture.name, text)
         self.assertNotIn("192.0.2", text)
+        self.assertNotIn("1700000000", text)
         self.assertEqual(
             serialized["protocol_inventory"]["inventory"]["frames_observed"],
             2,
@@ -228,6 +230,11 @@ class Phase4RuntimeTests(unittest.TestCase):
             serialized["protocol_inventory"]["event_correlation"]["frames_scanned"],
             2,
         )
+        self.assertEqual(
+            serialized["protocol_inventory"]["event_timeline"]["frames_observed"],
+            2,
+        )
+        self.assertEqual(popen.call_count, 2)
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
     def test_corrupted_bundle_is_reported_without_execution(self, popen):
