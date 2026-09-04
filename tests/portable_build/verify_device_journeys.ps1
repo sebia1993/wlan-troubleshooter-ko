@@ -80,7 +80,7 @@ try {
         throw "Portable BUILD_INFO does not preserve the device-journey privacy boundary."
     }
 
-    & $PythonPath (Join-Path $PSScriptRoot "generate_event_fixture.py") --output $Capture
+    & $PythonPath (Join-Path $PSScriptRoot "generate_device_journey_fixture.py") --output $Capture
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Capture -PathType Leaf)) {
         throw "Synthetic device-journey fixture generation failed."
     }
@@ -190,8 +190,10 @@ try {
         "198.51.100.10",
         "02:00:00:00:00:10",
         "02:00:00:00:00:20",
+        "02:00:00:00:00:30",
         "020000000010",
         "020000000020",
+        "020000000030",
         "0x01020304",
         "0x1234",
         "example.test",
