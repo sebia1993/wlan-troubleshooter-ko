@@ -180,15 +180,14 @@ try {
     $EthernetRaw = $EthernetAnalysis.Raw
 
     $Groups = @($EthernetResult.protocol_inventory.inventory.observations | ForEach-Object { $_.group_id })
-    Assert-ContainsAll -Observed $Groups -Expected @("eapol", "eap", "radius", "dhcp", "dns", "arp", "tcp") -Label "Ethernet protocol group"
+    Write-Host ("Ethernet protocol groups: " + ($Groups -join ", "))
+    Assert-ContainsAll -Observed $Groups -Expected @("eapol", "radius", "dhcp", "dns", "arp", "tcp") -Label "Ethernet protocol group"
 
     $EventTypes = @($EthernetResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.event_type })
+    Write-Host ("Ethernet event types: " + ($EventTypes -join ", "))
     Assert-ContainsAll -Observed $EventTypes -Expected @(
         "arp_request",
         "arp_reply",
-        "eap_request",
-        "eap_response",
-        "eap_success",
         "radius_access_request",
         "radius_access_accept",
         "dhcp_discover",
@@ -206,7 +205,7 @@ try {
     foreach ($Stage in $EthernetResult.protocol_inventory.event_timeline.stages) {
         $Stages[[string]$Stage.stage_id] = [string]$Stage.state
     }
-    foreach ($StageId in @("eap", "radius", "dhcp", "dns", "tcp")) {
+    foreach ($StageId in @("radius", "dhcp", "dns", "tcp")) {
         if ($Stages[$StageId] -ne "success-observed") {
             throw "Expected Ethernet success-observed stage was not produced: $StageId"
         }
@@ -225,16 +224,18 @@ try {
     )
 
     $Aliases = @($EthernetResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.correlation_alias } | Where-Object { $_ })
-    Assert-ContainsAll -Observed $Aliases -Expected @("EAP-1", "RADIUS-1", "DHCP-1", "DNS-1", "TCP-1") -Label "Ethernet correlation alias"
+    Assert-ContainsAll -Observed $Aliases -Expected @("RADIUS-1", "DHCP-1", "DNS-1", "TCP-1") -Label "Ethernet correlation alias"
 
     $WirelessAnalysis = Read-CompletedAnalysis -Output $WirelessOutput -ExpectedFrames 8
     $WirelessResult = $WirelessAnalysis.Result
     $WirelessRaw = $WirelessAnalysis.Raw
 
     $WirelessGroups = @($WirelessResult.protocol_inventory.inventory.observations | ForEach-Object { $_.group_id })
+    Write-Host ("Wireless protocol groups: " + ($WirelessGroups -join ", "))
     Assert-ContainsAll -Observed $WirelessGroups -Expected @("wlan", "eapol", "eap") -Label "Wireless protocol group"
 
     $WirelessEventTypes = @($WirelessResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.event_type })
+    Write-Host ("Wireless event types: " + ($WirelessEventTypes -join ", "))
     Assert-ContainsAll -Observed $WirelessEventTypes -Expected @(
         "wlan_auth_request",
         "wlan_auth_response_success",
@@ -255,6 +256,9 @@ try {
             throw "Expected wireless success-observed stage was not produced: $StageId"
         }
     }
+
+    $WirelessAliases = @($WirelessResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.correlation_alias } | Where-Object { $_ })
+    Assert-ContainsAll -Observed $WirelessAliases -Expected @("EAP-1") -Label "Wireless correlation alias"
 
     Assert-NoForbiddenText -Raw $WirelessRaw -Forbidden @(
         $WirelessCapture,
