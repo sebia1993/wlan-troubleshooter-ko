@@ -1,0 +1,113 @@
+name: Phase 4E Non-Unicast TSV Sanitizer
+
+on:
+  push:
+    branches:
+      - chatgpt/phase-4e-device-aliases
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase4e-nonunicast-sanitizer
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    name: Append deterministic non-unicast sanitizer once
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: "1"
+      PYTHONPATH: src
+
+    steps:
+      - name: Check out Phase 4E branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: chatgpt/phase-4e-device-aliases
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+          architecture: x64
+
+      - name: Append wrapper without changing the public API
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          path = Path("src/wlan_troubleshooter_ko/analysis/device_sessions.py")
+          text = path.read_text(encoding="utf-8")
+          marker = "PHASE4E_NON_UNICAST_TSV_SANITIZER"
+          if marker in text:
+              print("TSV sanitizer is already present.")
+              raise SystemExit(0)
+          if "def build_device_sessions(" not in text:
+              raise SystemExit("build_device_sessions was not found")
+
+          addition = r'''
+
+          # PHASE4E_NON_UNICAST_TSV_SANITIZER
+          # A broadcast or multicast destination is protocol context, not a device identity.
+          _PHASE4E_MAC_TOKEN = re.compile(
+              r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f])"
+          )
+          _phase4e_original_build_device_sessions = build_device_sessions
+
+
+          def _phase4e_remove_nonunicast_mac_tokens(text: str) -> str:
+              if not isinstance(text, str):
+                  raise DeviceSessionError("단말 식별 필드 출력은 텍스트여야 합니다.")
+
+              def replace(match: re.Match[str]) -> str:
+                  token = match.group(0)
+                  first_octet = int(token[0:2], 16)
+                  if token.casefold() == "ff:ff:ff:ff:ff:ff" or first_octet & 1:
+                      return ""
+                  return token
+
+              return _PHASE4E_MAC_TOKEN.sub(replace, text)
+
+
+          def build_device_sessions(
+              text: str,
+              profile,
+              transaction_sessions,
+              *args,
+              **kwargs,
+          ):
+              """Ignore valid non-unicast L2 cells before transient device pseudonymization."""
+
+              return _phase4e_original_build_device_sessions(
+                  _phase4e_remove_nonunicast_mac_tokens(text),
+                  profile,
+                  transaction_sessions,
+                  *args,
+                  **kwargs,
+              )
+          '''
+          path.write_text(text.rstrip() + addition + "\n", encoding="utf-8", newline="\n")
+          '@ | Set-Content -LiteralPath $env:RUNNER_TEMP\append_phase4e_sanitizer.py -Encoding utf8
+          python $env:RUNNER_TEMP\append_phase4e_sanitizer.py
+
+      - name: Run complete offline validation
+        shell: pwsh
+        run: ./scripts/verify_offline.ps1 -PythonPath python
+
+      - name: Commit generated wrapper
+        shell: pwsh
+        run: |
+          if (-not (git status --porcelain)) {
+              Write-Host "No source change was necessary."
+              exit 0
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/wlan_troubleshooter_ko/analysis/device_sessions.py
+          git commit -m "브로드캐스트·멀티캐스트 L2 셀을 단말 후보에서 제외"
+          git push origin HEAD:chatgpt/phase-4e-device-aliases
