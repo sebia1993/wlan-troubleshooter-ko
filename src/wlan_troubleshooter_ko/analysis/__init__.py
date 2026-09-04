@@ -1,12 +1,21 @@
 """결정론적 캡처 점검, 거래 시도, 단말 가명과 관찰 여정."""
 
-from wlan_troubleshooter_ko.analysis.device_journeys import (
-    DeviceJourney,
-    DeviceJourneyError,
-    DeviceJourneyReport,
-    DeviceJourneyStage,
-    build_device_journeys,
+from wlan_troubleshooter_ko.analysis import device_journeys as _device_journeys
+from wlan_troubleshooter_ko.analysis.device_journey_normalizer import (
+    wrap_device_journey_builder,
 )
+
+DeviceJourney = _device_journeys.DeviceJourney
+DeviceJourneyError = _device_journeys.DeviceJourneyError
+DeviceJourneyReport = _device_journeys.DeviceJourneyReport
+DeviceJourneyStage = _device_journeys.DeviceJourneyStage
+build_device_journeys = wrap_device_journey_builder(
+    _device_journeys.build_device_journeys
+)
+# Direct imports used by the TShark orchestration and tests must receive the
+# same safety boundary before service.py imports tshark.inventory.
+_device_journeys.build_device_journeys = build_device_journeys
+
 from wlan_troubleshooter_ko.analysis.device_sessions import (
     DeviceAttemptLink,
     DeviceSession,
