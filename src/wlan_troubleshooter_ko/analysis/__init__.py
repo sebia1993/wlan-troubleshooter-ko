@@ -1,5 +1,12 @@
-"""결정론적 캡처 점검, Finding, 거래 시도와 실행별 단말 가명."""
+"""결정론적 캡처 점검, 거래 시도, 단말 가명과 관찰 여정."""
 
+from wlan_troubleshooter_ko.analysis.device_journeys import (
+    DeviceJourney,
+    DeviceJourneyError,
+    DeviceJourneyReport,
+    DeviceJourneyStage,
+    build_device_journeys,
+)
 from wlan_troubleshooter_ko.analysis.device_sessions import (
     DeviceAttemptLink,
     DeviceSession,
@@ -57,6 +64,10 @@ __all__ = [
     "CaptureStructure",
     "CaptureStructureError",
     "DeviceAttemptLink",
+    "DeviceJourney",
+    "DeviceJourneyError",
+    "DeviceJourneyReport",
+    "DeviceJourneyStage",
     "DeviceSession",
     "DeviceSessionError",
     "DeviceSessionReport",
@@ -77,6 +88,7 @@ __all__ = [
     "TransactionSessionError",
     "TransactionSessionReport",
     "analyze_capture",
+    "build_device_journeys",
     "build_device_sessions",
     "build_event_correlation",
     "build_event_timeline",
