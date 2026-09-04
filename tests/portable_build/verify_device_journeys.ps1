@@ -127,13 +127,16 @@ try {
         $Report.schema_version -ne 1 -or
         $Report.journeys_total -ne 1 -or
         $Report.source_complete -ne $true -or
+        $Report.linkage_complete -ne $false -or
+        $Report.complete -ne $false -or
+        [int]$Report.unassigned_attempts -lt 1 -or
         $Report.raw_identifiers_serialized -ne $false -or
         $Report.aliases_stable_across_runs -ne $false -or
         $Report.device_identity_confirmed -ne $false -or
         $Report.cross_protocol_session_confirmed -ne $false -or
         $Report.root_cause_confirmed -ne $false
     ) {
-        throw "Portable device-journey report is missing or violated its privacy boundary."
+        throw "Portable device-journey report is missing or violated its conservative linkage/privacy boundary."
     }
 
     $Journey = @($Report.journeys)[0]
@@ -151,21 +154,22 @@ try {
     }
 
     $ObservedOrder = @($Journey.observed_stage_order)
-    foreach ($ExpectedProtocol in @("eap", "dhcp", "dns", "tcp")) {
+    foreach ($ExpectedProtocol in @("dhcp", "dns", "tcp")) {
         if ($ObservedOrder -notcontains $ExpectedProtocol) {
             throw "Portable DEVICE-1 journey is missing a stage: $ExpectedProtocol"
         }
     }
-    if ($ObservedOrder[0] -ne "eap" -or $ObservedOrder[-1] -ne "tcp") {
+    if ($ObservedOrder[0] -ne "dhcp" -or $ObservedOrder[-1] -ne "tcp") {
         throw "Portable DEVICE-1 stage order does not follow observed packet order."
     }
+    if ($ObservedOrder -contains "eap" -or $ObservedOrder -contains "radius") {
+        throw "A protocol without direct L2 device evidence was linked to DEVICE-1."
+    }
 
-    $EapStage = Get-Stage -Journey $Journey -Protocol "eap"
     $DhcpStage = Get-Stage -Journey $Journey -Protocol "dhcp"
     $DnsStage = Get-Stage -Journey $Journey -Protocol "dns"
     $TcpStage = Get-Stage -Journey $Journey -Protocol "tcp"
     if (
-        $EapStage.state -ne "complete" -or
         $DhcpStage.state -ne "complete" -or
         $DnsStage.state -ne "complete" -or
         $TcpStage.state -ne "mixed"
@@ -201,7 +205,7 @@ try {
         throw "Portable device-journey analysis modified its distribution directory."
     }
 
-    Write-Host "Portable DEVICE-1 EAP/DHCP/DNS/TCP conservative journey integration test passed."
+    Write-Host "Portable DEVICE-1 DHCP/DNS/TCP conservative journey integration test passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
