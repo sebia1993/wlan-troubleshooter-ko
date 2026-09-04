@@ -143,23 +143,22 @@ try {
     $BuildInfoPath = Join-Path $Expanded "BUILD_INFO.json"
     $BuildInfo = Get-Content -LiteralPath $BuildInfoPath -Raw | ConvertFrom-Json -Depth 32
     $BuildInfo.product_version = $ProductVersion
-    if ($BuildInfo.PSObject.Properties.Name -contains "protocol_inventory_runtime") {
-        $BuildInfo.protocol_inventory_runtime = "enabled"
+    $RuntimeFlags = [ordered]@{
+        protocol_inventory_runtime = "enabled"
+        event_timeline_runtime = "enabled"
+        transaction_session_runtime = "enabled"
+        device_session_runtime = "enabled"
+        raw_identifier_serialization = "disabled"
+        alias_secret_persistence = "disabled"
+        cross_run_alias_stability = "disabled"
     }
-    else {
-        $BuildInfo | Add-Member -NotePropertyName protocol_inventory_runtime -NotePropertyValue "enabled"
-    }
-    if ($BuildInfo.PSObject.Properties.Name -contains "event_timeline_runtime") {
-        $BuildInfo.event_timeline_runtime = "enabled"
-    }
-    else {
-        $BuildInfo | Add-Member -NotePropertyName event_timeline_runtime -NotePropertyValue "enabled"
-    }
-    if ($BuildInfo.PSObject.Properties.Name -contains "transaction_session_runtime") {
-        $BuildInfo.transaction_session_runtime = "enabled"
-    }
-    else {
-        $BuildInfo | Add-Member -NotePropertyName transaction_session_runtime -NotePropertyValue "enabled"
+    foreach ($Entry in $RuntimeFlags.GetEnumerator()) {
+        if ($BuildInfo.PSObject.Properties.Name -contains $Entry.Key) {
+            $BuildInfo.($Entry.Key) = $Entry.Value
+        }
+        else {
+            $BuildInfo | Add-Member -NotePropertyName $Entry.Key -NotePropertyValue $Entry.Value
+        }
     }
     $BuildInfo | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $BuildInfoPath -Encoding utf8
 
