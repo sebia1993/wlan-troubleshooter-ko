@@ -48,6 +48,36 @@ function Write-SafeSchemaLines {
     }
 }
 
+function Invoke-EapSchemaProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$TShark,
+        [Parameter(Mandatory = $true)][string]$Capture,
+        [Parameter(Mandatory = $true)][string]$WorkRoot
+    )
+
+    $DecodeErrors = Join-Path $WorkRoot ($Label + "-decode-errors.txt")
+    $Decodes = @(& $TShark -n -G decodes 2> $DecodeErrors)
+    Write-Host "$Label -G decodes exit: $LASTEXITCODE"
+    $DecodeMatches = @($Decodes | Where-Object {
+        ([string]$_) -match '(^|\t)eapol\.type(\t|$)|(^|\t)eap(\t|$)'
+    })
+    Write-SafeSchemaLines -Label "$Label EAP decode" -Lines $DecodeMatches
+
+    $ProtocolErrors = Join-Path $WorkRoot ($Label + "-protocol-errors.txt")
+    $Protocols = @(& $TShark -n -G protocols 2> $ProtocolErrors)
+    Write-Host "$Label -G protocols exit: $LASTEXITCODE"
+    $ProtocolMatches = @($Protocols | Where-Object {
+        ([string]$_) -match '(^|\t)(EAP|EAPOL|eap|eapol)(\t|$)'
+    })
+    Write-SafeSchemaLines -Label "$Label EAP protocol" -Lines $ProtocolMatches
+
+    $FieldErrors = Join-Path $WorkRoot ($Label + "-field-errors.txt")
+    $Rows = @(& $TShark -n -2 -r $Capture -T fields -E 'header=y' -E 'separator=/t' -E 'occurrence=f' -E 'quote=d' -e frame.number -e frame.protocols -e eapol.type -e eap.code -e eap.id -e eap.type 2> $FieldErrors)
+    Write-Host "$Label synthetic field extraction exit: $LASTEXITCODE"
+    Write-SafeSchemaLines -Label "$Label EAP synthetic row" -Lines $Rows
+}
+
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
 if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) {
     throw "Portable package metadata is missing."
@@ -74,42 +104,54 @@ try {
         throw "Bundled TShark is missing."
     }
 
-    $OldPath = $env:PATH
-    $OldPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
-    $OldPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
+    $EnvironmentNames = @(
+        "PATH",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "WIRESHARK_CONFIG_DIR",
+        "WIRESHARK_PLUGIN_DIR",
+        "WIRESHARK_EXTCAP_DIR",
+        "WIRESHARK_DATA_DIR",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "TZ"
+    )
+    $OriginalEnvironment = @{}
+    foreach ($Name in $EnvironmentNames) {
+        $OriginalEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+    }
     try {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
         Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
         $env:PATH = (Join-Path $env:SystemRoot "System32") + ";" + $env:SystemRoot
 
-        $DecodeErrors = Join-Path $WorkRoot "decode-errors.txt"
-        $Decodes = @(& $TShark -n -G decodes 2> $DecodeErrors)
-        $DecodeExit = $LASTEXITCODE
-        Write-Host "EAP schema diagnostic -G decodes exit: $DecodeExit"
-        $DecodeMatches = @($Decodes | Where-Object {
-            ([string]$_) -match '(^|\t)eapol\.type(\t|$)|(^|\t)eap(\t|$)'
-        })
-        Write-SafeSchemaLines -Label "EAP decode" -Lines $DecodeMatches
+        Invoke-EapSchemaProbe -Label "default" -TShark $TShark -Capture $Capture -WorkRoot $WorkRoot
 
-        $ProtocolErrors = Join-Path $WorkRoot "protocol-errors.txt"
-        $Protocols = @(& $TShark -n -G protocols 2> $ProtocolErrors)
-        $ProtocolExit = $LASTEXITCODE
-        Write-Host "EAP schema diagnostic -G protocols exit: $ProtocolExit"
-        $ProtocolMatches = @($Protocols | Where-Object {
-            ([string]$_) -match '(^|\t)(EAP|EAPOL|eap|eapol)(\t|$)'
-        })
-        Write-SafeSchemaLines -Label "EAP protocol" -Lines $ProtocolMatches
+        $Isolation = Join-Path $WorkRoot "isolated"
+        New-Item -ItemType Directory -Path $Isolation | Out-Null
+        foreach ($Name in @("config", "plugins", "extcap", "data", "temp")) {
+            New-Item -ItemType Directory -Path (Join-Path $Isolation $Name) | Out-Null
+        }
+        $env:WIRESHARK_CONFIG_DIR = Join-Path $Isolation "config"
+        $env:WIRESHARK_PLUGIN_DIR = Join-Path $Isolation "plugins"
+        $env:WIRESHARK_EXTCAP_DIR = Join-Path $Isolation "extcap"
+        $env:WIRESHARK_DATA_DIR = Join-Path $Isolation "data"
+        $env:TEMP = Join-Path $Isolation "temp"
+        $env:TMP = Join-Path $Isolation "temp"
+        $env:TMPDIR = Join-Path $Isolation "temp"
+        $env:LANG = "C"
+        $env:LC_ALL = "C"
+        $env:TZ = "UTC"
 
-        $FieldErrors = Join-Path $WorkRoot "field-errors.txt"
-        $Rows = @(& $TShark -n -2 -r $Capture -T fields -E 'header=y' -E 'separator=/t' -E 'occurrence=f' -E 'quote=d' -e frame.number -e frame.protocols -e eapol.type -e eap.code -e eap.id -e eap.type 2> $FieldErrors)
-        $FieldExit = $LASTEXITCODE
-        Write-Host "EAP synthetic field extraction exit: $FieldExit"
-        Write-SafeSchemaLines -Label "EAP synthetic row" -Lines $Rows
+        Invoke-EapSchemaProbe -Label "isolated" -TShark $TShark -Capture $Capture -WorkRoot $WorkRoot
     }
     finally {
-        $env:PATH = $OldPath
-        Restore-EnvironmentValue -Name "PYTHONPATH" -Value $OldPythonPath
-        Restore-EnvironmentValue -Name "PYTHONHOME" -Value $OldPythonHome
+        foreach ($Name in $EnvironmentNames) {
+            Restore-EnvironmentValue -Name $Name -Value $OriginalEnvironment[$Name]
+        }
     }
 }
 finally {
