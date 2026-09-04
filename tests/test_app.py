@@ -89,8 +89,8 @@ class AppSmokeTests(unittest.TestCase):
 
             self.assertTrue(state.valid)
             self.assertIn("캡처 유형 추정", state.detail)
-            self.assertIn("프로토콜·접속 단계·이벤트·거래 시도 분석", state.detail)
-            self.assertIn("거래 시도", state.detail)
+            self.assertIn("프로토콜·접속 단계·이벤트·거래·단말 가명 분석", state.detail)
+            self.assertIn("단말 가명", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)
