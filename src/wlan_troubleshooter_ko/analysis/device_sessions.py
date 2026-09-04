@@ -390,7 +390,14 @@ def _direct_station_addresses(
             if len(candidates) == 1:
                 add(candidates[0], "wlan-eap-supplicant")
 
-    if "eap" in protocol_set:
+    # EAP decoded inside RADIUS carries the NAD/server Ethernet addresses, not
+    # the original supplicant L2 address. Only direct EAPOL/EAP frames may
+    # establish an Ethernet device alias.
+    if (
+        "eap" in protocol_set
+        and "eapol" in protocol_set
+        and "radius" not in protocol_set
+    ):
         if eap_code == 1:
             add(eth_destination, "ethernet-eap-request")
         elif eap_code == 2:
