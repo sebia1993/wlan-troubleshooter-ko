@@ -29,37 +29,51 @@ def _source_module():
     return module
 
 
+def _eapol_key(
+    source: object,
+    message_number: int,
+    sequence: int,
+    replay_counter: int,
+    *,
+    retry: bool = False,
+) -> bytes:
+    from_access_point = message_number in {1, 3}
+    descriptor = source._key_descriptor(message_number, replay_counter)
+    eapol = struct.pack("!BBH", 2, 3, len(descriptor)) + descriptor
+    llc_snap = bytes.fromhex("aaaa03000000888e")
+    return (
+        source._qos_data_header(
+            from_access_point,
+            sequence,
+            retry=retry,
+        )
+        + llc_snap
+        + eapol
+    )
+
+
 def frames() -> Iterable[Tuple[int, bytes]]:
     source = _source_module()
-    old_first = struct.pack("!Q", 10)
-    old_later = struct.pack("!Q", 11)
-    new_first = struct.pack("!Q", FIRST_COUNTER)
-    new_later = struct.pack("!Q", LATER_COUNTER)
-    first_replacements = 0
-    later_replacements = 0
-    output = []
-    for timestamp, original in source.frames():
-        first_count = original.count(old_first)
-        later_count = original.count(old_later)
-        if first_count > 1 or later_count > 1 or (first_count and later_count):
-            raise RuntimeError("unexpected Replay Counter layout")
-        frame = original
-        if first_count:
-            frame = frame.replace(old_first, new_first, 1)
-            first_replacements += 1
-        elif later_count:
-            frame = frame.replace(old_later, new_later, 1)
-            later_replacements += 1
-        output.append((timestamp, frame))
-    if (first_replacements, later_replacements) != (2, 3):
-        raise RuntimeError("expected M1/M2 and M3/M3/M4 counters were not found")
-    return tuple(output)
+    source_frames = tuple(source.frames())
+    if len(source_frames) != 9:
+        raise RuntimeError("Phase 4I fixture frame layout changed")
+
+    for timestamp, frame in source_frames[:4]:
+        yield timestamp, frame
+    yield 5, _eapol_key(source, 1, 5, FIRST_COUNTER)
+    yield 6, _eapol_key(source, 2, 6, FIRST_COUNTER)
+    yield 7, _eapol_key(source, 3, 7, LATER_COUNTER)
+    yield 8, _eapol_key(source, 3, 8, LATER_COUNTER, retry=True)
+    yield 9, _eapol_key(source, 4, 9, LATER_COUNTER)
 
 
 def build_pcap() -> bytes:
+    source = _source_module()
     output = bytearray(bytes.fromhex("d4c3b2a1"))
     output += struct.pack("<HHiIII", 2, 4, 0, 0, 65535, 127)
-    for timestamp, frame in frames():
+    radiotap = source._radiotap_header()
+    for timestamp, dot11_frame in frames():
+        frame = radiotap + dot11_frame
         output += struct.pack(
             "<IIII",
             1_700_003_000 + timestamp,
