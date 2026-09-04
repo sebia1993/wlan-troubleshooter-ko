@@ -232,7 +232,7 @@ try {
 
     $WirelessGroups = @($WirelessResult.protocol_inventory.inventory.observations | ForEach-Object { $_.group_id })
     Write-Host ("Wireless protocol groups: " + ($WirelessGroups -join ", "))
-    Assert-ContainsAll -Observed $WirelessGroups -Expected @("wlan", "eapol", "eap") -Label "Wireless protocol group"
+    Assert-ContainsAll -Observed $WirelessGroups -Expected @("radiotap", "wlan", "eapol") -Label "Wireless protocol group"
 
     $WirelessEventTypes = @($WirelessResult.protocol_inventory.event_timeline.events | ForEach-Object { $_.event_type })
     Write-Host ("Wireless event types: " + ($WirelessEventTypes -join ", "))
@@ -276,7 +276,7 @@ try {
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
         throw "Portable event analysis modified its distribution directory."
     }
-    Write-Host "Portable Ethernet and IEEE 802.11 event timeline integration tests passed."
+    Write-Host "Portable Ethernet and Radiotap IEEE 802.11 event timeline integration tests passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
