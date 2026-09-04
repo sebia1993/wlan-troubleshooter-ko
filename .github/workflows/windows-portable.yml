@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   portable:
-    name: Build and verify Win64 portable Replay Counter relation package
+    name: Build and verify Win64 portable PCAPNG statistics package
     runs-on: windows-latest
-    timeout-minutes: 130
+    timeout-minutes: 140
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
@@ -74,4 +74,5 @@ jobs:
           ./tests/portable_build/verify_capture_observability.ps1 -PackageOutputPath $Package -PythonPath python
           ./tests/portable_build/verify_eapol_handshakes.ps1 -PackageOutputPath $Package -PythonPath python
           ./tests/portable_build/verify_eapol_replay_relations.ps1 -PackageOutputPath $Package -PythonPath python
+          ./tests/portable_build/verify_pcapng_interface_statistics.ps1 -PackageOutputPath $Package -PythonPath python
           Get-Content -LiteralPath $Package
