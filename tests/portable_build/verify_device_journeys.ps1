@@ -152,24 +152,22 @@ try {
     }
 
     $ObservedOrder = @($Journey.observed_stage_order)
-    foreach ($ExpectedProtocol in @("eap", "dhcp", "dns", "tcp")) {
+    foreach ($ExpectedProtocol in @("dhcp", "dns", "tcp")) {
         if ($ObservedOrder -notcontains $ExpectedProtocol) {
             throw "Portable DEVICE-1 journey is missing a stage: $ExpectedProtocol"
         }
     }
-    if ($ObservedOrder[0] -ne "eap" -or $ObservedOrder[-1] -ne "tcp") {
+    if ($ObservedOrder[0] -ne "dhcp" -or $ObservedOrder[-1] -ne "tcp") {
         throw "Portable DEVICE-1 stage order does not follow observed packet order."
     }
-    if ($ObservedOrder -contains "radius") {
-        throw "RADIUS was linked to DEVICE-1 without direct supplicant L2 evidence."
+    if ($ObservedOrder -contains "eap" -or $ObservedOrder -contains "radius") {
+        throw "A protocol without a decoded direct transaction was linked to DEVICE-1."
     }
 
-    $EapStage = Get-Stage -Journey $Journey -Protocol "eap"
     $DhcpStage = Get-Stage -Journey $Journey -Protocol "dhcp"
     $DnsStage = Get-Stage -Journey $Journey -Protocol "dns"
     $TcpStage = Get-Stage -Journey $Journey -Protocol "tcp"
     if (
-        $EapStage.state -ne "complete" -or
         $DhcpStage.state -ne "complete" -or
         $DnsStage.state -ne "complete" -or
         $TcpStage.state -ne "mixed"
@@ -206,7 +204,7 @@ try {
     if (($BeforeFiles -join "|") -ne ($AfterFiles -join "|")) {
         throw "Portable device-journey analysis modified its distribution directory."
     }
-    Write-Host "Portable DEVICE-1 EAP/DHCP/DNS/TCP journey with unassigned RADIUS passed."
+    Write-Host "Portable DEVICE-1 DHCP/DNS/TCP journey with unassigned EAP/RADIUS passed."
 }
 finally {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
