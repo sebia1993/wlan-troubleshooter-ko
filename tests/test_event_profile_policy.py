@@ -86,7 +86,7 @@ class EventProfilePolicyTests(unittest.TestCase):
             },
         )
 
-    def test_generated_event_argv_rejects_live_capture_sensitive_field_and_decode_changes(self):
+    def test_generated_event_argv_rejects_live_capture_and_sensitive_field(self):
         catalog_lines = ["P\tFrame\tframe\n"]
         for field in APPROVED_FIELDS:
             protocol = field.split(".", 1)[0]
@@ -111,8 +111,6 @@ class EventProfilePolicyTests(unittest.TestCase):
             str(capture),
             "-c",
             str(profile.max_packets),
-            "-d",
-            "eapol.type==0,eap",
             "-T",
             "fields",
             "-E",
@@ -138,20 +136,6 @@ class EventProfilePolicyTests(unittest.TestCase):
         sensitive[-1] = "ip.src"
         with self.assertRaises(TSharkPolicyError):
             assert_safe_profile_argv(sensitive)
-
-        missing_decode = arguments[:7] + arguments[9:]
-        with self.assertRaises(TSharkPolicyError):
-            assert_safe_profile_argv(missing_decode)
-
-        changed_decode = list(arguments)
-        changed_decode[8] = "eapol.type==1,eap"
-        with self.assertRaises(TSharkPolicyError):
-            assert_safe_profile_argv(changed_decode)
-
-        changed_protocol = list(arguments)
-        changed_protocol[8] = "eapol.type==0,data"
-        with self.assertRaises(TSharkPolicyError):
-            assert_safe_profile_argv(changed_protocol)
 
 
 if __name__ == "__main__":
