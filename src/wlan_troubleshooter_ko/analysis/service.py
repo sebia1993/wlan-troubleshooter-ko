@@ -1,4 +1,4 @@
-"""캡처 사전 점검, 프로토콜 인벤토리, Finding과 이벤트 타임라인을 조정한다."""
+"""캡처 사전 점검, 인벤토리, Finding, 타임라인과 거래 시도를 조정한다."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from wlan_troubleshooter_ko.analysis.preflight import (
     inspect_capture_structure,
 )
 from wlan_troubleshooter_ko.analysis.protocol_inventory import ProtocolInventoryError
+from wlan_troubleshooter_ko.analysis.transaction_sessions import TransactionSessionError
 from wlan_troubleshooter_ko.core.capture import (
     CaptureInfo,
     CaptureValidationError,
@@ -88,6 +89,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             TSharkExecutionError,
             EventCorrelationError,
             EventTimelineError,
+            TransactionSessionError,
         ),
     ):
         return str(exc)
@@ -107,7 +109,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             "내장 TShark 파일이 누락되었거나 변경되었습니다. "
             "배포 ZIP을 다시 압축 해제해 주세요."
         )
-    return "접속 단계와 이벤트 타임라인 분석을 안전하게 완료하지 못했습니다."
+    return "접속 단계·이벤트 타임라인·거래 시도 분석을 안전하게 완료하지 못했습니다."
 
 
 def _without_inventory(
@@ -139,7 +141,7 @@ def analyze_capture(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> CaptureAnalysisResult:
-    """사전 점검 후 내장 TShark로 접속 단계, Finding과 이벤트 타임라인을 분석한다."""
+    """내장 TShark로 접속 단계, Finding, 타임라인과 거래 시도를 분석한다."""
 
     try:
         capture: CaptureInfo = validate_capture(capture_path, cancel_event=cancel_event)
@@ -220,8 +222,8 @@ def analyze_capture(
         capabilities=capabilities,
         inventory_state="completed",
         inventory_message=(
-            "내장 TShark로 프로토콜 인벤토리, 접속 단계 Finding과 "
-            "비식별 이벤트 타임라인을 완료했습니다."
+            "내장 TShark로 프로토콜 인벤토리, 접속 단계 Finding, "
+            "비식별 이벤트 타임라인과 거래 시도 요약을 완료했습니다."
         ),
         protocol_inventory=inventory_run,
     )
