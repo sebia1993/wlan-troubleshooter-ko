@@ -64,7 +64,7 @@ class AppSmokeTests(unittest.TestCase):
             rendered = json.dumps(value, ensure_ascii=False)
 
             self.assertEqual(exit_code, 2)
-            self.assertEqual(value["schema_version"], 3)
+            self.assertEqual(value["schema_version"], 2)
             self.assertEqual(value["protocol_inventory_state"], "unavailable")
             self.assertNotIn(str(capture), rendered)
             self.assertNotIn(capture.name, rendered)
