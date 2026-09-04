@@ -76,5 +76,21 @@ def _stat_snapshot(file_stat: os.stat_result) -> Tuple[int, ...]:
 
 
 def _same_directory_identity(current: os.stat_result, expected: Tuple[int, ...]) -> bool:
+    """Compare stable directory identity while allowing normal content metadata churn.
+
+    TShark may create and remove temporary files inside the dedicated empty
+    directory. On Windows this can toggle ordinary attributes such as
+    ``FILE_ATTRIBUTE_ARCHIVE`` even though the directory object was never
+    replaced. Device/inode, object type, link count and the security-relevant
+    reparse-point bit must remain unchanged; timestamps, size and ordinary
+    mutable attributes are intentionally ignored after execution.
+    """
+
     snapshot = _stat_snapshot(current)
-    return all(snapshot[index] == expected[index] for index in (0, 1, 2, 3, 7))
+    stable_identity_matches = all(
+        snapshot[index] == expected[index] for index in (0, 1, 2, 3)
+    )
+    reparse_state_matches = (
+        snapshot[7] & _REPARSE_POINT_FLAG
+    ) == (expected[7] & _REPARSE_POINT_FLAG)
+    return stable_identity_matches and reparse_state_matches
