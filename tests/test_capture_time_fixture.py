@@ -72,6 +72,12 @@ class CaptureTimeFixtureTests(unittest.TestCase):
     def test_sensitive_metadata_and_absolute_time_canaries_are_present(self):
         raw = self.fixture.build_pcapng()
         source = self.fixture._source_module()
+        timestamp = self.fixture.BASE_TIMESTAMP_TICKS
+        timestamp_canary = struct.pack(
+            "<II",
+            (timestamp >> 32) & 0xFFFFFFFF,
+            timestamp & 0xFFFFFFFF,
+        )
 
         for value in (
             self.fixture.PRIVATE_SECTION_COMMENT,
@@ -87,7 +93,7 @@ class CaptureTimeFixtureTests(unittest.TestCase):
             source._CLIENT_IP,
             source._GATEWAY_IP,
             source._DNS_IP,
-            struct.pack("<Q", self.fixture.BASE_TIMESTAMP_TICKS),
+            timestamp_canary,
         ):
             self.assertIn(value, raw)
 
