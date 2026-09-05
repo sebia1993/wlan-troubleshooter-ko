@@ -19,6 +19,9 @@ from wlan_troubleshooter_ko.analysis.models import (
 )
 from wlan_troubleshooter_ko.analysis.pcap_scan import scan_pcap
 from wlan_troubleshooter_ko.analysis.pcapng_scan import scan_pcapng
+from wlan_troubleshooter_ko.analysis.pcapng_statistics import (
+    enrich_pcapng_interface_statistics,
+)
 from wlan_troubleshooter_ko.core.capture import (
     CaptureInfo,
     CaptureValidationError,
@@ -89,6 +92,14 @@ def inspect_capture_structure(
                     max_block_length,
                     cancel_event,
                 )
+                result = enrich_pcapng_interface_statistics(
+                    handle,
+                    capture,
+                    result,
+                    max_records,
+                    max_block_length,
+                    cancel_event,
+                )
             else:
                 raise CaptureStructureError("지원하지 않는 캡처 형식입니다.")
     except CaptureStructureError:
@@ -153,6 +164,17 @@ def classify_capture_capabilities(
         available.append("DHCP·DNS·ARP·TCP·TLS 패킷 존재 여부(후속 TShark 확인 필요)")
     else:
         unavailable.append("IP 계층 DHCP·DNS·TCP 연결 분석")
+    if structure.interface_statistics:
+        available.append("PCAPNG Interface Statistics Block 카운터 관찰")
+        if any(
+            item.counter_state == "reported-drop-observed"
+            for item in structure.interface_statistics
+        ):
+            cautions.append("PCAPNG 통계에 0보다 큰 드롭 카운터가 있지만 특정 장애 패킷 누락이나 근본 원인을 확정하지 않습니다.")
+        else:
+            cautions.append("PCAPNG 드롭 카운터가 없거나 0이어도 캡처 손실이 없었다고 확정하지 않습니다.")
+    elif structure.capture_format == "pcapng":
+        cautions.append("PCAPNG 인터페이스 통계(Interface Statistics Block)가 없어 캡처 도구 드롭 카운터를 확인할 수 없습니다.")
     if link_types & PPI_LINK_TYPES:
         cautions.append("PPI는 내부 캡슐화를 확인하기 전 802.11·RF·IP 캡처로 확정하지 않습니다.")
     if structure.truncated_packets_observed:
