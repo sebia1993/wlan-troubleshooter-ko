@@ -89,6 +89,10 @@ _PROFILE_REQUIRED_FIELDS = {
     "eapol-replay-relations": {
         "frame.number",
     },
+    "capture-time-boundaries": {
+        "frame.number",
+        "frame.time_epoch",
+    },
 }
 
 _DEVICE_IDENTITY_FIELD_ORDER = (
@@ -110,11 +114,17 @@ _EAPOL_REPLAY_RELATION_FIELD_ORDER = (
     *TRANSIENT_EAPOL_RELATION_FIELDS,
 )
 
+_CAPTURE_TIME_BOUNDARY_FIELD_ORDER = (
+    "frame.number",
+    "frame.time_epoch",
+)
+
 _PROFILE_FIELD_ORDER = {
     "protocol-inventory": APPROVED_FIELDS,
     "connection-events": APPROVED_FIELDS,
     "device-identities": _DEVICE_IDENTITY_FIELD_ORDER,
     "eapol-replay-relations": _EAPOL_REPLAY_RELATION_FIELD_ORDER,
+    "capture-time-boundaries": _CAPTURE_TIME_BOUNDARY_FIELD_ORDER,
 }
 
 _FIELD_OUTPUT_PREFIX = [

@@ -38,6 +38,7 @@ def self_check() -> Dict[str, str]:
     event_profile = field_registry.get_profile("connection-events")
     identity_profile = field_registry.get_profile("device-identities")
     replay_profile = field_registry.get_profile("eapol-replay-relations")
+    time_profile = field_registry.get_profile("capture-time-boundaries")
     tkinter.Tcl()
 
     vendor_root = distribution_root() / "vendor" / "wireshark"
@@ -50,11 +51,11 @@ def self_check() -> Dict[str, str]:
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
         analysis_execution = (
-            "활성 · Finding·거래·DEVICE-N/AP-N·미응답·EAPOL 관계·"
-            "PCAPNG 인터페이스 통계"
+            "활성 · Finding·거래·DEVICE-N/AP-N·미응답·상대 시간·"
+            "EAPOL 관계·PCAPNG 인터페이스 통계"
         )
     return {
-        "phase": "4K",
+        "phase": "4L",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "rule_count": str(len(rules["rules"])),
@@ -65,6 +66,7 @@ def self_check() -> Dict[str, str]:
         "event_field_count": str(len(event_profile.fields)),
         "identity_field_count": str(len(identity_profile.fields)),
         "replay_relation_field_count": str(len(replay_profile.fields)),
+        "capture_time_field_count": str(len(time_profile.fields)),
         "transaction_session_schema_version": "1",
         "device_session_schema_version": "1",
         "device_journey_schema_version": "1",
@@ -72,6 +74,7 @@ def self_check() -> Dict[str, str]:
         "eapol_handshake_schema_version": "1",
         "eapol_replay_relation_schema_version": "1",
         "pcapng_interface_statistics_schema_version": "1",
+        "capture_time_boundary_schema_version": "1",
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
         "python_external_required": "true" if _external_python_required() else "false",
@@ -81,7 +84,8 @@ def self_check() -> Dict[str, str]:
         "analysis_features": (
             "캡처 구조·PCAPNG 인터페이스 통계 + 프로토콜 인벤토리 + "
             "접속 단계 Finding + 비식별 이벤트·거래 + DEVICE-N/AP-N + "
-            "단말 여정 + 미응답 경계 + EAPOL M1~M4·Replay Counter 관계"
+            "단말 여정 + 미응답 경계 + 캡처 상대 시간·거래 경계 + "
+            "EAPOL M1~M4·Replay Counter 관계"
         ),
         "identity_privacy": (
             "원문 L2 주소 미직렬화 · HMAC 키 미저장 · 실행 간 별칭 비고정 · "
@@ -90,6 +94,11 @@ def self_check() -> Dict[str, str]:
         "absence_boundary": (
             "캡처 시작·종료·무손실·양방향 수집 미증명 · "
             "응답 미관찰만으로 실패 확정 금지"
+        ),
+        "capture_time_boundary": (
+            "frame.number·frame.time_epoch 전용 최소 프로파일 · "
+            "절대 epoch 미직렬화 · 첫 프레임 기준 상대 밀리초만 공개 · "
+            "종료 뒤 관찰 시간으로 응답 대기 충분성·실제 미응답 확정 금지"
         ),
         "eapol_handshake_boundary": (
             "Nonce·MIC·Key Data 미추출 · Replay Counter 원문 미직렬화·미저장 · "
