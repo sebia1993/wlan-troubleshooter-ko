@@ -1,4 +1,4 @@
-"""결정론적 캡처 점검부터 PCAPNG 통계 관찰까지의 공개 API."""
+"""결정론적 캡처 점검부터 PCAPNG 통계·EAPOL 관계까지의 공개 API."""
 
 from wlan_troubleshooter_ko.analysis.capture_observability import (
     CaptureObservabilityError,
@@ -60,8 +60,14 @@ from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
     CaptureStructure,
     CaptureStructureError,
-    InterfaceStatisticsObservation,
     InterfaceSummary,
+)
+from wlan_troubleshooter_ko.analysis.pcapng_interface_statistics import (
+    CounterObservation,
+    InterfaceStatistics,
+    PcapngInterfaceStatisticsError,
+    PcapngInterfaceStatisticsReport,
+    inspect_pcapng_interface_statistics,
 )
 from wlan_troubleshooter_ko.analysis.preflight import (
     classify_capture_capabilities,
@@ -93,6 +99,7 @@ __all__ = [
     "CaptureObservabilityReport",
     "CaptureStructure",
     "CaptureStructureError",
+    "CounterObservation",
     "DeviceAttemptLink",
     "DeviceJourney",
     "DeviceJourneyError",
@@ -114,8 +121,10 @@ __all__ = [
     "EventTimelineError",
     "EventTypeSummary",
     "IncompleteAttemptAssessment",
-    "InterfaceStatisticsObservation",
+    "InterfaceStatistics",
     "InterfaceSummary",
+    "PcapngInterfaceStatisticsError",
+    "PcapngInterfaceStatisticsReport",
     "ProtocolEvent",
     "ProtocolInventory",
     "ProtocolInventoryError",
@@ -139,4 +148,5 @@ __all__ = [
     "build_transaction_sessions",
     "classify_capture_capabilities",
     "inspect_capture_structure",
+    "inspect_pcapng_interface_statistics",
 ]
