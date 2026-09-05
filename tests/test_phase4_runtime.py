@@ -29,6 +29,9 @@ F\tDHCP message type\tdhcp.option.dhcp\tFT_UINT8\tdhcp\tBASE_DEC\t0x0\t
 F\tEthernet source\teth.src\tFT_ETHER\teth\t\t0x0\t
 F\tEthernet destination\teth.dst\tFT_ETHER\teth\t\t0x0\t
 """
+REPLAY_CATALOG_TEXT = CATALOG_TEXT + """F\tEAPOL message number\twlan_rsna_eapol.keydes.msgnr\tFT_UINT8\twlan_rsna_eapol\tBASE_DEC\t0x0\t
+F\tEAPOL Replay Counter\teapol.keydes.replay_counter\tFT_UINT64\teapol\tBASE_DEC\t0x0\t
+"""
 FIELDS_TEXT = """"frame.number"\t"frame.interface_id"\t"frame.cap_len"\t"frame.len"\t"frame.protocols"
 "1"\t"0"\t"42"\t"42"\t"eth:ethertype:arp"
 "2"\t"0"\t"71"\t"71"\t"eth:ethertype:ip:udp:dns"
@@ -40,6 +43,10 @@ EVENT_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.interface_id"\
 IDENTITY_FIELDS_TEXT = """"frame.number"\t"frame.time_epoch"\t"frame.protocols"\t"dhcp.option.dhcp"\t"eth.src"\t"eth.dst"
 "1"\t"1700000000.000000000"\t"eth:ethertype:ip:udp:dhcp"\t"1"\t"02:00:00:00:00:10"\t"ff:ff:ff:ff:ff:ff"
 "2"\t"1700000001.000000000"\t"eth:ethertype:ip:udp:dhcp"\t"5"\t"02:00:00:00:00:20"\t"ff:ff:ff:ff:ff:ff"
+"""
+REPLAY_FIELDS_TEXT = """"frame.number"\t"wlan_rsna_eapol.keydes.msgnr"\t"eapol.keydes.replay_counter"
+"1"\t\t
+"2"\t\t
 """
 
 
@@ -175,6 +182,7 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertNotIn("-i", inventory_arguments)
         self.assertNotIn("ip.src", inventory_arguments)
         self.assertNotIn("eth.src", inventory_arguments)
+        self.assertNotIn("eapol.keydes.replay_counter", inventory_arguments)
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
     def test_nonzero_exit_never_exposes_stderr(self, popen):
@@ -210,12 +218,14 @@ class Phase4RuntimeTests(unittest.TestCase):
         )
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
-    def test_service_returns_aliases_without_raw_identifiers(self, popen):
+    def test_service_returns_aliases_and_replay_relations_without_raw_values(self, popen):
         root, vendor, capture, _workspace = self.setup_paths()
         popen.side_effect = [
             FakeProcess(CATALOG_TEXT.encode("utf-8")),
             FakeProcess(EVENT_FIELDS_TEXT.encode("utf-8")),
             FakeProcess(IDENTITY_FIELDS_TEXT.encode("utf-8")),
+            FakeProcess(REPLAY_CATALOG_TEXT.encode("utf-8")),
+            FakeProcess(REPLAY_FIELDS_TEXT.encode("utf-8")),
         ]
 
         result = analyze_capture(
@@ -232,6 +242,7 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(result.protocol_inventory.event_timeline)
         self.assertIsNotNone(result.protocol_inventory.transaction_sessions)
         self.assertIsNotNone(result.protocol_inventory.device_sessions)
+        self.assertIsNotNone(result.eapol_replay_relations)
 
         device_report = result.protocol_inventory.device_sessions
         self.assertEqual(len(device_report.devices), 1)
@@ -244,6 +255,15 @@ class Phase4RuntimeTests(unittest.TestCase):
         self.assertFalse(device_report.alias_secret_persisted)
         self.assertFalse(device_report.aliases_stable_across_runs)
 
+        replay = result.eapol_replay_relations
+        self.assertTrue(replay.field_available)
+        self.assertEqual(replay.observations_source_total, 0)
+        self.assertEqual(replay.observations, ())
+        self.assertFalse(replay.raw_replay_counters_serialized)
+        self.assertFalse(replay.replay_counter_values_persisted)
+        self.assertFalse(replay.same_handshake_confirmed)
+        self.assertFalse(replay.retransmission_confirmed)
+
         text = json.dumps(serialized, ensure_ascii=False)
         for forbidden in (
             str(capture),
@@ -253,6 +273,7 @@ class Phase4RuntimeTests(unittest.TestCase):
             "02:00:00:00:00:10",
             "02:00:00:00:00:20",
             "020000000010",
+            '"replay_counter":',
         ):
             self.assertNotIn(forbidden, text)
         self.assertEqual(serialized["schema_version"], 2)
@@ -284,16 +305,26 @@ class Phase4RuntimeTests(unittest.TestCase):
             ],
             1,
         )
-        self.assertEqual(popen.call_count, 3)
+        self.assertEqual(
+            serialized["eapol_replay_relations"]["observations_evaluated"],
+            0,
+        )
+        self.assertEqual(popen.call_count, 5)
 
         event_arguments = popen.call_args_list[1].args[0]
         identity_arguments = popen.call_args_list[2].args[0]
+        replay_arguments = popen.call_args_list[4].args[0]
         self.assertNotIn("eth.src", event_arguments)
         self.assertNotIn("eth.dst", event_arguments)
+        self.assertNotIn("eapol.keydes.replay_counter", event_arguments)
         self.assertIn("eth.src", identity_arguments)
         self.assertIn("eth.dst", identity_arguments)
+        self.assertNotIn("eapol.keydes.replay_counter", identity_arguments)
         self.assertNotIn("ip.src", identity_arguments)
         self.assertNotIn("dns.qry.name", identity_arguments)
+        self.assertIn("eapol.keydes.replay_counter", replay_arguments)
+        self.assertNotIn("eth.src", replay_arguments)
+        self.assertNotIn("wlan.bssid", replay_arguments)
 
     @mock.patch("wlan_troubleshooter_ko.tshark.runner.subprocess.Popen")
     def test_corrupted_bundle_is_reported_without_execution(self, popen):

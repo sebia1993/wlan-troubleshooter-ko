@@ -22,16 +22,17 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_project_module_and_release_versions_match(self):
         self.assertEqual(self.value("version"), wlan_troubleshooter_ko.__version__)
-        self.assertEqual(self.value("version"), "0.11.0a1")
-        self.assertEqual(self.value("release-tag"), "v0.11.0-alpha.1")
-        self.assertEqual(self.value("phase"), "4I")
+        self.assertEqual(self.value("version"), "0.12.0a1")
+        self.assertEqual(self.value("release-tag"), "v0.12.0-alpha.1")
+        self.assertEqual(self.value("phase"), "4J")
         self.assertEqual(self.value("ruleset-version"), "0.2.0")
-        self.assertEqual(self.value("field-profile-version"), "0.5.0")
+        self.assertEqual(self.value("field-profile-version"), "0.6.0")
         self.assertEqual(self.value("transaction-session-version"), "1")
         self.assertEqual(self.value("device-session-version"), "1")
         self.assertEqual(self.value("device-journey-version"), "1")
         self.assertEqual(self.value("capture-observability-version"), "1")
         self.assertEqual(self.value("eapol-handshake-version"), "1")
+        self.assertEqual(self.value("eapol-replay-relation-version"), "1")
 
     def test_portable_component_versions_are_pinned(self):
         self.assertEqual(self.value("portable-python"), "3.13")
