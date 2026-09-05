@@ -8,11 +8,8 @@ a particular protocol packet was lost or identify a root cause.
 
 from __future__ import annotations
 
-import hashlib
-import struct
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import BinaryIO, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from wlan_troubleshooter_ko.core.capture import CaptureInfo
@@ -161,112 +158,84 @@ def _read_exact(handle: BinaryIO, length: int) -> bytes:
     return bytes(chunks)
 
 
-def _same_capture(left: CaptureInfo, right: CaptureInfo) -> bool:
-    return (
-        left.path == right.path
-        and left.capture_format == right.capture_format
-        and left.size_bytes == right.size_bytes
-        and left.sha256 == right.sha256
-    )
-
-
-def _fingerprint(path: Path, capture_format: str) -> CaptureInfo:
-    try:
-        size = path.stat().st_size
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            while True:
-                chunk = handle.read(_READ_CHUNK)
-                if not chunk:
-                    break
-                digest.update(chunk)
-    except OSError as exc:
+def _uint(raw: bytes, byte_order: str) -> int:
+    if byte_order not in {"little", "big"}:
         raise PcapngInterfaceStatisticsError(
-            "캡처 파일 지문을 안전하게 확인할 수 없습니다."
-        ) from exc
-    return CaptureInfo(
-        path=path,
-        capture_format=capture_format,
-        size_bytes=size,
-        sha256=digest.hexdigest(),
-    )
-
-
-def _validate_expected_capture(capture: CaptureInfo) -> CaptureInfo:
-    if not isinstance(capture, CaptureInfo):
-        raise PcapngInterfaceStatisticsError(
-            "검증된 캡처 정보가 필요합니다."
+            "PCAPNG 바이트 순서가 올바르지 않습니다."
         )
-    if not capture.path.is_absolute() or not capture.path.is_file():
-        raise PcapngInterfaceStatisticsError(
-            "검증된 로컬 캡처 파일을 사용할 수 없습니다."
-        )
-    observed = _fingerprint(capture.path, capture.capture_format)
-    if not _same_capture(observed, capture):
-        raise PcapngInterfaceStatisticsError(
-            "캡처 파일이 기존 검증 이후 변경되었습니다."
-        )
-    return observed
+    return int.from_bytes(raw, byteorder=byte_order, signed=False)
 
 
-def _block_length(raw: bytes, endian: str) -> int:
+def _block_length(
+    raw: bytes,
+    byte_order: str,
+    *,
+    minimum: int,
+    offset: int,
+    file_size: int,
+) -> int:
     if len(raw) != 4:
         raise PcapngInterfaceStatisticsError(
             "PCAPNG 블록 길이 필드가 올바르지 않습니다."
         )
-    value = struct.unpack(endian + "I", raw)[0]
-    if value < 12 or value % 4 or value > _MAX_BLOCK_BYTES:
+    value = _uint(raw, byte_order)
+    if (
+        value < minimum
+        or value % 4
+        or value > _MAX_BLOCK_BYTES
+        or value > file_size - offset
+    ):
         raise PcapngInterfaceStatisticsError(
             "PCAPNG 블록 길이가 올바르지 않습니다."
         )
     return value
 
 
-def _section_header(
-    length_bytes: bytes,
-    handle: BinaryIO,
-) -> Tuple[str, int, bytes]:
-    bom = _read_exact(handle, 4)
-    if bom == _LITTLE_BOM:
-        endian = "<"
-    elif bom == _BIG_BOM:
-        endian = ">"
-    else:
+def _validate_input(capture: CaptureInfo) -> None:
+    if not isinstance(capture, CaptureInfo):
         raise PcapngInterfaceStatisticsError(
-            "PCAPNG Section Header의 Byte-Order Magic이 올바르지 않습니다."
+            "검증된 캡처 정보가 필요합니다."
         )
-    total_length = _block_length(length_bytes, endian)
-    if total_length < 28:
+    if (
+        not capture.path.is_absolute()
+        or not capture.path.is_file()
+        or capture.size_bytes < 0
+        or not isinstance(capture.sha256, str)
+        or len(capture.sha256) != 64
+    ):
         raise PcapngInterfaceStatisticsError(
-            "PCAPNG Section Header 길이가 너무 짧습니다."
+            "검증된 로컬 캡처 파일을 사용할 수 없습니다."
         )
-    remainder = _read_exact(handle, total_length - 12)
-    if struct.unpack(endian + "I", remainder[-4:])[0] != total_length:
+    try:
+        current_size = capture.path.stat().st_size
+    except OSError:
         raise PcapngInterfaceStatisticsError(
-            "PCAPNG Section Header의 앞·뒤 길이가 일치하지 않습니다."
+            "캡처 파일 크기를 안전하게 확인할 수 없습니다."
+        ) from None
+    if current_size != capture.size_bytes:
+        raise PcapngInterfaceStatisticsError(
+            "캡처 파일 크기가 기존 검증 이후 변경되었습니다."
         )
-    return endian, total_length, bom + remainder[:-4]
 
 
-def _options(
+def _iter_options(
     data: bytes,
-    endian: str,
-) -> Dict[str, int]:
+    byte_order: str,
+) -> Iterable[Tuple[int, bytes]]:
     offset = 0
     count = 0
-    counters: Dict[str, int] = {}
-    found_end = False
     while offset < len(data):
         if len(data) - offset < 4:
             raise PcapngInterfaceStatisticsError(
-                "PCAPNG ISB 옵션 헤더가 잘렸습니다."
+                "PCAPNG 옵션 헤더가 블록 끝에서 잘렸습니다."
             )
-        code, length = struct.unpack_from(endian + "HH", data, offset)
+        code = _uint(data[offset : offset + 2], byte_order)
+        length = _uint(data[offset + 2 : offset + 4], byte_order)
         offset += 4
         count += 1
         if count > _MAX_OPTIONS_PER_BLOCK:
             raise PcapngInterfaceStatisticsError(
-                "PCAPNG ISB 옵션 수가 안전 제한을 초과했습니다."
+                "PCAPNG 옵션 수가 안전 제한을 초과했습니다."
             )
         if code == 0:
             if length != 0:
@@ -277,39 +246,43 @@ def _options(
                 raise PcapngInterfaceStatisticsError(
                     "PCAPNG 옵션 종료 뒤에 0이 아닌 데이터가 있습니다."
                 )
-            found_end = True
-            break
-        padded = (length + 3) & ~3
-        if padded > len(data) - offset:
+            return
+
+        padded_length = (length + 3) & ~3
+        if padded_length > len(data) - offset:
             raise PcapngInterfaceStatisticsError(
-                "PCAPNG ISB 옵션 값이 선언된 길이보다 짧습니다."
+                "PCAPNG 옵션 값이 선언된 길이보다 짧습니다."
             )
         raw = data[offset : offset + length]
-        padding = data[offset + length : offset + padded]
+        padding = data[offset + length : offset + padded_length]
         if any(padding):
             raise PcapngInterfaceStatisticsError(
-                "PCAPNG ISB 옵션 패딩이 0이 아닙니다."
+                "PCAPNG 옵션 패딩이 0이 아닙니다."
             )
-        offset += padded
+        offset += padded_length
+        yield code, raw
+
+
+def _validate_ignored_options(data: bytes, byte_order: str) -> None:
+    for _code, _raw in _iter_options(data, byte_order):
+        pass
+
+
+def _counter_options(data: bytes, byte_order: str) -> Dict[str, int]:
+    counters: Dict[str, int] = {}
+    for code, raw in _iter_options(data, byte_order):
         name = _COUNTER_OPTIONS.get(code)
         if name is None:
             continue
-        if length != 8:
-            raise PcapngInterfaceStatisticsError(
-                "PCAPNG ISB Counter 옵션 길이가 8바이트가 아닙니다."
-            )
         if name in counters:
             raise PcapngInterfaceStatisticsError(
                 "동일 ISB에 같은 Counter 옵션이 중복됐습니다."
             )
-        counters[name] = struct.unpack(endian + "Q", raw)[0]
-    if data and not found_end:
-        # PCAPNG permits options that consume the exact remaining body without
-        # an explicit end option. Accept that canonical bounded form.
-        if offset != len(data):
+        if len(raw) != 8:
             raise PcapngInterfaceStatisticsError(
-                "PCAPNG ISB 옵션 영역을 완전히 처리하지 못했습니다."
+                "PCAPNG ISB Counter 옵션 길이가 8바이트가 아닙니다."
             )
+        counters[name] = _uint(raw, byte_order)
     return counters
 
 
@@ -325,10 +298,15 @@ def _progression(values: Sequence[int]) -> str:
     return "counter-unchanged-observed"
 
 
-def _interface_state(values: Mapping[str, Sequence[int]], isb_count: int) -> str:
-    if isb_count == 0:
+def _interface_state(
+    values: Mapping[str, Sequence[int]],
+    statistics_blocks: int,
+) -> str:
+    if statistics_blocks == 0:
         return "no-interface-statistics"
-    drop_values = tuple(values.get("ifdrop", ())) + tuple(values.get("osdrop", ()))
+    drop_values = tuple(values.get("ifdrop", ())) + tuple(
+        values.get("osdrop", ())
+    )
     if not drop_values:
         return "statistics-without-drop-counters"
     if any(value > 0 for value in drop_values):
@@ -336,8 +314,11 @@ def _interface_state(values: Mapping[str, Sequence[int]], isb_count: int) -> str
     return "zero-reported-drop-counters"
 
 
-def _report_state(interfaces: Sequence[InterfaceStatistics], isb_count: int) -> str:
-    if isb_count == 0:
+def _report_state(
+    interfaces: Sequence[InterfaceStatistics],
+    statistics_blocks: int,
+) -> str:
+    if statistics_blocks == 0:
         return "no-interface-statistics"
     states = {item.state for item in interfaces}
     if "reported-drop-observed" in states:
@@ -369,6 +350,33 @@ def _unsupported_report() -> PcapngInterfaceStatisticsReport:
     )
 
 
+def _freeze_interface(
+    value: _InterfaceAccumulator,
+) -> InterfaceStatistics:
+    counters = tuple(
+        CounterObservation(
+            name=name,
+            observations=len(value.counters[name]),
+            first_value=(
+                None if not value.counters[name] else value.counters[name][0]
+            ),
+            last_value=(
+                None if not value.counters[name] else value.counters[name][-1]
+            ),
+            progression=_progression(value.counters[name]),
+        )
+        for name in _COUNTER_ORDER
+    )
+    return InterfaceStatistics(
+        interface_alias=value.alias,
+        section_index=value.section_index,
+        interface_id=value.interface_id,
+        statistics_blocks=value.statistics_blocks,
+        state=_interface_state(value.counters, value.statistics_blocks),
+        counters=counters,
+    )
+
+
 def inspect_pcapng_interface_statistics(
     capture: CaptureInfo,
     *,
@@ -376,30 +384,25 @@ def inspect_pcapng_interface_statistics(
 ) -> PcapngInterfaceStatisticsReport:
     """Return identifier-free standard ISB counters for a verified capture."""
 
-    before = _validate_expected_capture(capture)
+    _validate_input(capture)
+    _cancelled(cancel_event)
     if capture.capture_format != "pcapng":
         return _unsupported_report()
 
     section_index = -1
-    endian: Optional[str] = None
-    section_interfaces = 0
+    byte_order: Optional[str] = None
+    section_interfaces: List[_InterfaceAccumulator] = []
+    all_interfaces: List[_InterfaceAccumulator] = []
     blocks = 0
     sections = 0
-    isb_blocks = 0
-    interfaces: Dict[Tuple[int, int], _InterfaceAccumulator] = {}
-    aliases = 0
+    statistics_blocks = 0
 
     try:
         with capture.path.open("rb") as handle:
-            while True:
+            while handle.tell() < capture.size_bytes:
                 _cancelled(cancel_event)
-                type_bytes = handle.read(4)
-                if not type_bytes:
-                    break
-                if len(type_bytes) != 4:
-                    raise PcapngInterfaceStatisticsError(
-                        "PCAPNG 블록 종류 필드가 잘렸습니다."
-                    )
+                block_offset = handle.tell()
+                type_bytes = _read_exact(handle, 4)
                 length_bytes = _read_exact(handle, 4)
                 blocks += 1
                 if blocks > _MAX_BLOCKS:
@@ -408,143 +411,138 @@ def inspect_pcapng_interface_statistics(
                     )
 
                 if type_bytes == _SHB_TYPE:
-                    endian, _total_length, _body = _section_header(
+                    bom = _read_exact(handle, 4)
+                    if bom == _LITTLE_BOM:
+                        current_order = "little"
+                    elif bom == _BIG_BOM:
+                        current_order = "big"
+                    else:
+                        raise PcapngInterfaceStatisticsError(
+                            "PCAPNG Section Header의 Byte-Order Magic이 올바르지 않습니다."
+                        )
+                    total_length = _block_length(
                         length_bytes,
-                        handle,
+                        current_order,
+                        minimum=28,
+                        offset=block_offset,
+                        file_size=capture.size_bytes,
                     )
+                    remainder = _read_exact(handle, total_length - 12)
+                    if len(remainder) < 16:
+                        raise PcapngInterfaceStatisticsError(
+                            "PCAPNG Section Header 고정 필드가 잘렸습니다."
+                        )
+                    trailing_length = _uint(remainder[-4:], current_order)
+                    if trailing_length != total_length:
+                        raise PcapngInterfaceStatisticsError(
+                            "PCAPNG Section Header의 앞·뒤 길이가 일치하지 않습니다."
+                        )
+                    _validate_ignored_options(remainder[12:-4], current_order)
+                    byte_order = current_order
+                    section_index += 1
                     sections += 1
                     if sections > _MAX_SECTIONS:
                         raise PcapngInterfaceStatisticsError(
                             "PCAPNG 섹션 수가 안전 제한을 초과했습니다."
                         )
-                    section_index += 1
-                    section_interfaces = 0
+                    section_interfaces = []
                     continue
 
-                if endian is None or section_index < 0:
+                if byte_order is None or section_index < 0:
                     raise PcapngInterfaceStatisticsError(
-                        "PCAPNG 첫 블록이 Section Header가 아닙니다."
+                        "Section Header Block보다 앞에 다른 PCAPNG 블록이 있습니다."
                     )
-                total_length = _block_length(length_bytes, endian)
-                remainder = _read_exact(handle, total_length - 8)
-                if struct.unpack(endian + "I", remainder[-4:])[0] != total_length:
+
+                block_type = _uint(type_bytes, byte_order)
+                minimum = 20 if block_type == _IDB_TYPE else 24 if block_type == _ISB_TYPE else 12
+                total_length = _block_length(
+                    length_bytes,
+                    byte_order,
+                    minimum=minimum,
+                    offset=block_offset,
+                    file_size=capture.size_bytes,
+                )
+                body = _read_exact(handle, total_length - 12)
+                trailing_length = _uint(_read_exact(handle, 4), byte_order)
+                if trailing_length != total_length:
                     raise PcapngInterfaceStatisticsError(
                         "PCAPNG 블록의 앞·뒤 길이가 일치하지 않습니다."
                     )
-                body = remainder[:-4]
-                block_type = struct.unpack(endian + "I", type_bytes)[0]
 
                 if block_type == _IDB_TYPE:
                     if len(body) < 8:
                         raise PcapngInterfaceStatisticsError(
-                            "PCAPNG Interface Description Block이 너무 짧습니다."
+                            "PCAPNG Interface Description Block 고정 필드가 잘렸습니다."
                         )
-                    if len(interfaces) >= _MAX_INTERFACES:
+                    _validate_ignored_options(body[8:], byte_order)
+                    if len(all_interfaces) >= _MAX_INTERFACES:
                         raise PcapngInterfaceStatisticsError(
                             "PCAPNG 인터페이스 수가 안전 제한을 초과했습니다."
                         )
-                    key = (section_index, section_interfaces)
-                    aliases += 1
-                    interfaces[key] = _InterfaceAccumulator(
-                        alias="IFACE-" + str(aliases),
+                    interface = _InterfaceAccumulator(
+                        alias="IFACE-" + str(len(all_interfaces) + 1),
                         section_index=section_index,
-                        interface_id=section_interfaces,
+                        interface_id=len(section_interfaces),
                         statistics_blocks=0,
                         counters={name: [] for name in _COUNTER_ORDER},
                     )
-                    section_interfaces += 1
-                    continue
+                    section_interfaces.append(interface)
+                    all_interfaces.append(interface)
 
-                if block_type != _ISB_TYPE:
-                    continue
-                isb_blocks += 1
-                if isb_blocks > _MAX_ISB_BLOCKS:
-                    raise PcapngInterfaceStatisticsError(
-                        "PCAPNG Interface Statistics Block 수가 안전 제한을 초과했습니다."
-                    )
-                if len(body) < 12:
-                    raise PcapngInterfaceStatisticsError(
-                        "PCAPNG Interface Statistics Block이 너무 짧습니다."
-                    )
-                interface_id = struct.unpack_from(endian + "I", body, 0)[0]
-                key = (section_index, interface_id)
-                accumulator = interfaces.get(key)
-                if accumulator is None:
-                    raise PcapngInterfaceStatisticsError(
-                        "PCAPNG ISB가 정의되지 않은 Interface ID를 참조합니다."
-                    )
-                counters = _options(body[12:], endian)
-                accumulator.statistics_blocks += 1
-                for name, value in counters.items():
-                    accumulator.counters[name].append(value)
-    except OSError as exc:
+                elif block_type == _ISB_TYPE:
+                    if len(body) < 12:
+                        raise PcapngInterfaceStatisticsError(
+                            "PCAPNG Interface Statistics Block 고정 필드가 잘렸습니다."
+                        )
+                    interface_id = _uint(body[:4], byte_order)
+                    if interface_id >= len(section_interfaces):
+                        raise PcapngInterfaceStatisticsError(
+                            "Interface Statistics Block이 선언되지 않은 Interface ID를 참조합니다."
+                        )
+                    statistics_blocks += 1
+                    if statistics_blocks > _MAX_ISB_BLOCKS:
+                        raise PcapngInterfaceStatisticsError(
+                            "PCAPNG Interface Statistics Block 수가 안전 제한을 초과했습니다."
+                        )
+                    counters = _counter_options(body[12:], byte_order)
+                    interface = section_interfaces[interface_id]
+                    interface.statistics_blocks += 1
+                    for name, value in counters.items():
+                        interface.counters[name].append(value)
+
+            if handle.tell() != capture.size_bytes:
+                raise PcapngInterfaceStatisticsError(
+                    "PCAPNG 블록 경계가 파일 크기와 일치하지 않습니다."
+                )
+    except PcapngInterfaceStatisticsError:
+        raise
+    except OSError:
         raise PcapngInterfaceStatisticsError(
             "PCAPNG 인터페이스 통계를 안전하게 읽을 수 없습니다."
-        ) from exc
+        ) from None
 
-    if sections == 0:
-        raise PcapngInterfaceStatisticsError(
-            "PCAPNG Section Header를 찾을 수 없습니다."
-        )
-
-    after = _fingerprint(capture.path, capture.capture_format)
-    if not _same_capture(before, after):
-        raise PcapngInterfaceStatisticsError(
-            "PCAPNG 통계 분석 중 캡처 파일이 변경되었습니다."
-        )
-
-    frozen_interfaces = []
-    for key in sorted(interfaces):
-        item = interfaces[key]
-        counters = tuple(
-            CounterObservation(
-                name=name,
-                observations=len(item.counters[name]),
-                first_value=(
-                    item.counters[name][0]
-                    if item.counters[name]
-                    else None
-                ),
-                last_value=(
-                    item.counters[name][-1]
-                    if item.counters[name]
-                    else None
-                ),
-                progression=_progression(item.counters[name]),
-            )
-            for name in _COUNTER_ORDER
-        )
-        frozen_interfaces.append(
-            InterfaceStatistics(
-                interface_alias=item.alias,
-                section_index=item.section_index,
-                interface_id=item.interface_id,
-                statistics_blocks=item.statistics_blocks,
-                state=_interface_state(
-                    item.counters,
-                    item.statistics_blocks,
-                ),
-                counters=counters,
-            )
-        )
-    frozen = tuple(frozen_interfaces)
-    state = _report_state(frozen, isb_blocks)
+    frozen = tuple(_freeze_interface(item) for item in all_interfaces)
+    state = _report_state(frozen, statistics_blocks)
     cautions = [
-        "0으로 보고된 드롭 Counter는 캡처 손실이 없었다는 증명이 아닙니다.",
-        "Interface Statistics Block이 없다는 사실은 캡처 손실이 없다는 뜻이 아닙니다.",
-        "양의 드롭 Counter는 특정 EAPOL·DHCP·DNS·TCP 패킷 누락을 확정하지 않습니다.",
-        "캡처 도구·운영체제·드라이버·SPAN·무선 채널 중 책임 위치를 확정하지 않습니다.",
-        "실제 인터페이스 이름과 절대 ISB timestamp는 결과에 기록하지 않습니다.",
+        "Interface Statistics Block Counter는 캡처 도구가 기록한 메타데이터입니다.",
+        "드롭 Counter가 0이어도 캡처 손실이 없었다는 뜻은 아닙니다.",
+        "Interface Statistics Block이 없어도 캡처 손실이 없었다는 뜻은 아닙니다.",
+        "양수 드롭 Counter는 특정 패킷 누락이나 RF·AP·단말·SPAN 장애를 확정하지 않습니다.",
+        "여러 누적 Counter 스냅샷은 합산하지 않고 첫·마지막 값과 변화 방향만 제공합니다.",
     ]
-    if state == "reported-drop-observed":
+    if statistics_blocks == 0:
         cautions.insert(
             0,
-            "하나 이상의 인터페이스에서 캡처 도구가 보고한 양의 드롭 Counter가 관찰됐습니다.",
+            "PCAPNG에서 Interface Statistics Block을 관찰하지 못했습니다.",
         )
-    elif state == "statistics-without-drop-counters":
+    if any(
+        counter.progression == "counter-decrease-observed"
+        for interface in frozen
+        for counter in interface.counters
+    ):
         cautions.insert(
             0,
-            "ISB는 있으나 ifdrop·osdrop Counter가 제공되지 않았습니다.",
+            "파일 순서상 Counter 감소가 관찰됐지만 초기화·재시작·wrap 중 하나로 확정하지 않습니다.",
         )
 
     return PcapngInterfaceStatisticsReport(
@@ -553,9 +551,9 @@ def inspect_pcapng_interface_statistics(
         state=state,
         sections_observed=sections,
         interfaces_defined=len(frozen),
-        statistics_blocks_observed=isb_blocks,
+        statistics_blocks_observed=statistics_blocks,
         interfaces_with_statistics=sum(
-            1 for item in frozen if item.statistics_blocks > 0
+            item.statistics_blocks > 0 for item in frozen
         ),
         interfaces=frozen,
         raw_interface_identifiers_serialized=False,
