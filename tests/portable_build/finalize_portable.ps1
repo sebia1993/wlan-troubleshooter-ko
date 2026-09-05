@@ -156,6 +156,8 @@ try {
         raw_replay_counter_serialization = "disabled"
         replay_counter_persistence = "disabled"
         absolute_timestamp_serialization = "disabled"
+        pcapng_string_option_serialization = "disabled"
+        interface_name_serialization = "disabled"
         raw_identifier_serialization = "disabled"
         alias_secret_persistence = "disabled"
         cross_run_alias_stability = "disabled"
