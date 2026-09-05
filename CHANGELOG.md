@@ -1,52 +1,52 @@
 # 변경 기록
 
-## 0.12.0-alpha.1 — 2026-09-05
+## 0.13.0-alpha.1 — 2026-09-05
 
 ### 추가
 
-- Wireshark 4.6.8 `eapol.keydes.replay_counter` 전용 최소 추출 프로파일
-- M1/M2 및 M3/M4 Counter 동일·불일치 관계
-- M1→M3 Counter 증가·동일·감소 관계
-- 반복 M1~M4의 같은 Counter·다른 Counter 관계
-- `expected-relations-observed`, `relation-mismatch-observed`, `multiple-values-observed`, `partial`, `insufficient-events`, `unavailable`
-- GUI `[11. EAPOL Replay Counter 관계]`
-- 최상위 JSON 스키마 2의 `eapol_replay_relations` 추가 결과
-- 고유 64비트 Counter를 사용하는 Portable 실제 내장 TShark 검증
+- PCAPNG Interface Statistics Block bounded 로컬 파서
+- 섹션별 little-endian·big-endian 처리
+- `isb_ifrecv`, `isb_ifdrop`, `isb_filteraccept`, `isb_osdrop`, `isb_usrdeliv`
+- Interface Description Block 선언 순서 기반 `IFACE-N`
+- 여러 ISB의 Counter 관찰 횟수·첫·마지막 보고값
+- 증가·감소·변화 없음·단일 관찰 구분
+- GUI `[12. PCAPNG 인터페이스 통계]`
+- 최상위 JSON 스키마 2의 `pcapng_interface_statistics`
+- TShark가 없는 소스 실행 모드의 독립 통계 보고서
+- 민감 문자열과 두 ISB를 포함하는 Portable 실제 PCAPNG 게이트
 
-### 개인정보·키 정보 보호
+### 보안·개인정보
 
-- Replay Counter 원문을 공개 이벤트·GUI·JSON·로그에 기록하지 않음
-- 일반 분석·레거시·단말 가명 프로파일에서 Counter 원문 차단
-- 기존 분석과 동일한 캡처 SHA-256 및 TShark 매니페스트 재검증
-- Nonce·MIC·Key Data·Payload 추출 금지 유지
-- `raw_replay_counters_serialized=false`
-- `replay_counter_values_persisted=false`
-- `same_handshake_confirmed=false`
-- `retransmission_confirmed=false`
-- `key_installation_confirmed=false`
-- `cryptographic_success_confirmed=false`
+- 기존 `validate_capture`로 통계 분석 전후 경로·형식·크기·SHA-256 재검증
+- 인터페이스 이름·설명·GUID·장치 경로 미직렬화
+- 하드웨어·운영체제·캡처 앱·필터·주석 문자열 미직렬화
+- ISB 절대 Timestamp·starttime·endtime 미직렬화
+- 원본 MAC·IP·파일명·절대경로 미직렬화
+- `struct`만 오프라인 바이너리 파서용 표준 라이브러리로 감사 허용
+
+### 과장 방지
+
+- 드롭 Counter 0을 캡처 무손실로 해석하지 않음
+- ISB 부재를 캡처 무손실로 해석하지 않음
+- 양수 드롭을 특정 패킷 누락이나 RF·AP·단말·SPAN 장애로 확정하지 않음
+- 여러 누적 스냅샷을 합산하지 않음
+- Counter 감소를 재시작·초기화·wrap으로 확정하지 않음
+- `capture_loss_excluded=false`
+- `specific_packet_loss_confirmed=false`
 - `root_cause_confirmed=false`
 
-### 검증
+## 0.12.0-alpha.1 — 2026-09-05
 
-- Windows 전체 테스트 340개 실행, 339개 통과, 플랫폼 제약 테스트 1개 명시적 건너뜀
-- 오프라인 소스 감사 59개 파일 통과
-- 저장소 감사 156개 추적 파일 통과
-- Python·Wireshark 미설치 Portable 전체 실분석 통과
-- 후보 ZIP 크기 98,539,557바이트
-- 후보 ZIP SHA-256 `0273bbc000d3fc0b19ca4d4109c756fcf4c43d61945e09ba3f1ede09501ba3eb`
-
-### 오탐 방지
-
-- 일반적인 Counter 관계가 보여도 하나의 동일 Handshake로 확정하지 않음
-- 같은 메시지와 같은 Counter가 반복돼도 실제 재전송으로 확정하지 않음
-- 관계 불일치를 키 설치 실패·AP·단말·RF 장애의 근본 원인으로 확정하지 않음
-- 필드·프레임·근거 일부 누락은 `unavailable` 또는 `partial`로 제한
+- Replay Counter 전용 최소 TShark 프로파일
+- M1/M2·M3/M4 같음·불일치 관계와 M1→M3 증가 관계
+- 반복 메시지 같은 Counter·다른 Counter 관계
+- Counter 원문 비직렬화·비저장
+- 동일 Handshake·실제 재전송·키 설치·암호학적 성공 미확정
 
 ## 0.11.0-alpha.1 — 2026-09-05
 
 - 비식별 EAPOL-Key M1~M4 메시지 순서 관찰
-- 같은 메시지 번호 반복 및 802.11 Retry 비트 프레임
+- 같은 메시지 번호 반복과 802.11 Retry 비트 프레임
 - `DEVICE-N ↔ AP-N` 단일 근거 연결
 - 동일 Handshake·키 설치·암호학적 성공·근본 원인 미확정
 
@@ -58,13 +58,13 @@
 
 ## 0.9.0-alpha.1 — 2026-09-05
 
-- `DEVICE-N`에 안전하게 연결된 거래의 단말 관찰 여정
+- 분석 실행별 `DEVICE-N`에 안전하게 연결된 거래의 단말 관찰 여정
 - 실제 근거 프레임 순서와 첫 실패·마지막 성공 방향 단계
 
 ## 0.8.0-alpha.1 — 2026-09-04
 
 - 분석 실행별 `DEVICE-N`·`AP-N` HMAC 가명
-- 원본 MAC·BSSID·HMAC 키·토큰 비직렬화
+- 원본 MAC·BSSID·HMAC 키·내부 토큰 비직렬화
 
 ## 0.7.0-alpha.1 — 2026-09-04
 
@@ -76,7 +76,7 @@
 
 ## 0.5.0-alpha.1 — 2026-09-04
 
-- 접속 단계 상관분석과 근거 기반 Finding
+- 접속 단계 상관분석과 명시적 실패 Finding
 
 ## 0.4.0-alpha.1 — 2026-09-04
 

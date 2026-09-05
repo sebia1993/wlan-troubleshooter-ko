@@ -20,14 +20,10 @@ def package_root() -> Path:
 
 
 def distribution_root() -> Path:
-    """소스 실행에서는 저장소, PyInstaller onedir에서는 EXE 폴더를 반환한다."""
-
     return package_root().parents[1]
 
 
 def _external_python_required() -> bool:
-    """PyInstaller 배포 루트에 제품 EXE가 있는지 보수적으로 확인한다."""
-
     executable = distribution_root() / "WlanTroubleshooterKO.exe"
     return not executable.is_file()
 
@@ -54,11 +50,11 @@ def self_check() -> Dict[str, str]:
         tshark_status = "무결성 검증됨: " + verified.version
         tshark_external_required = "false"
         analysis_execution = (
-            "활성 · Finding·거래·DEVICE-N/AP-N·단말 여정·미응답 경계·"
-            "EAPOL-Key 순서·Replay Counter 관계"
+            "활성 · Finding·거래·DEVICE-N/AP-N·미응답·EAPOL 관계·"
+            "PCAPNG 인터페이스 통계"
         )
     return {
-        "phase": "4J",
+        "phase": "4K",
         "runtime_dependencies": "0",
         "ruleset_version": rules["ruleset_version"],
         "rule_count": str(len(rules["rules"])),
@@ -75,6 +71,7 @@ def self_check() -> Dict[str, str]:
         "capture_observability_schema_version": "1",
         "eapol_handshake_schema_version": "1",
         "eapol_replay_relation_schema_version": "1",
+        "pcapng_interface_statistics_schema_version": "1",
         "protocol_group_count": str(len(field_registry.protocol_groups)),
         "tkinter": "사용 가능",
         "python_external_required": "true" if _external_python_required() else "false",
@@ -82,10 +79,9 @@ def self_check() -> Dict[str, str]:
         "portable_tshark": tshark_status,
         "protocol_inventory_execution": analysis_execution,
         "analysis_features": (
-            "캡처 구조 점검 + 프로토콜 인벤토리 + 접속 단계 Finding + "
-            "비식별 이벤트·거래 + 분석 실행별 단말·AP 가명 + "
-            "단말 가명별 관찰 여정 + 캡처 관찰 가능성·미응답 해석 경계 + "
-            "EAPOL-Key M1~M4 메시지 순서 + Replay Counter 관계"
+            "캡처 구조·PCAPNG 인터페이스 통계 + 프로토콜 인벤토리 + "
+            "접속 단계 Finding + 비식별 이벤트·거래 + DEVICE-N/AP-N + "
+            "단말 여정 + 미응답 경계 + EAPOL M1~M4·Replay Counter 관계"
         ),
         "identity_privacy": (
             "원문 L2 주소 미직렬화 · HMAC 키 미저장 · 실행 간 별칭 비고정 · "
@@ -102,6 +98,10 @@ def self_check() -> Dict[str, str]:
         "eapol_replay_boundary": (
             "Counter 숫자 미출력 · 같음·증가·감소 관계만 공개 · "
             "동일 Handshake·재전송 미확정"
+        ),
+        "pcapng_statistics_boundary": (
+            "인터페이스 이름·절대 Timestamp 미출력 · Counter 비합산 · "
+            "0 또는 부재로 무손실 확정 금지 · 드롭으로 근본 원인 확정 금지"
         ),
         "network_features": "없음",
     }

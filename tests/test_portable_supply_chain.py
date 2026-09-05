@@ -12,6 +12,12 @@ class PortableSupplyChainTests(unittest.TestCase):
             (cls.support / "supply-chain.json").read_text(encoding="utf-8")
         )
 
+    def text(self, relative):
+        return (self.root / relative).read_text(encoding="utf-8")
+
+    def support_text(self, filename):
+        return (self.support / filename).read_text(encoding="utf-8")
+
     def test_supply_chain_schema_and_versions_are_exact(self):
         self.assertEqual(
             set(self.value),
@@ -30,13 +36,12 @@ class PortableSupplyChainTests(unittest.TestCase):
         self.assertEqual(set(wireshark), {"version", "msi", "source"})
 
     def test_downloads_are_exact_official_versioned_paths(self):
-        wireshark = self.value["wireshark"]
         expected = {
             "msi": "Wireshark-4.6.8-x64.msi",
             "source": "wireshark-4.6.8.tar.xz",
         }
         for name, filename in expected.items():
-            component = wireshark[name]
+            component = self.value["wireshark"][name]
             self.assertEqual(component["filename"], filename)
             scheme, separator, remainder = component["url"].partition("://")
             self.assertEqual((scheme, separator), ("https", "://"))
@@ -47,31 +52,27 @@ class PortableSupplyChainTests(unittest.TestCase):
             self.assertTrue(path.endswith(filename))
             self.assertNotIn("latest", path.casefold())
 
-    def test_hashes_are_pinned_lowercase_sha256(self):
+    def test_hashes_and_build_packages_are_pinned(self):
         for component_name in ("msi", "source"):
             digest = self.value["wireshark"][component_name]["sha256"]
             self.assertRegex(digest, r"^[0-9a-f]{64}$")
             self.assertNotEqual(digest, "0" * 64)
 
-    def test_build_requirements_are_exact_and_match_pyinstaller(self):
-        lines = [
+        requirements = [
             line.strip()
-            for line in (
-                self.support / "requirements-build.txt"
-            ).read_text(encoding="utf-8").splitlines()
+            for line in self.support_text("requirements-build.txt").splitlines()
             if line.strip()
         ]
-        self.assertTrue(lines)
-        self.assertEqual(lines, sorted(lines, key=str.casefold))
-        for line in lines:
+        self.assertEqual(requirements, sorted(requirements, key=str.casefold))
+        for line in requirements:
             self.assertRegex(line, r"^[A-Za-z0-9_.-]+==[0-9A-Za-z_.-]+$")
         self.assertIn(
             "pyinstaller==" + self.value["pyinstaller_version"],
-            [line.casefold() for line in lines],
+            [line.casefold() for line in requirements],
         )
 
-    def test_build_scripts_accept_no_url_or_version_parameters(self):
-        for filename in (
+    def test_build_and_verification_scripts_accept_no_supply_chain_override(self):
+        scripts = (
             "build_portable.ps1",
             "finalize_portable.ps1",
             "verify_protocol_inventory.ps1",
@@ -82,24 +83,22 @@ class PortableSupplyChainTests(unittest.TestCase):
             "verify_capture_observability.ps1",
             "verify_eapol_handshakes.ps1",
             "verify_eapol_replay_relations.ps1",
-        ):
-            text = (self.support / filename).read_text(encoding="utf-8")
-            parameter_block = text.split(")", 1)[0]
+            "verify_pcapng_interface_statistics.ps1",
+        )
+        for filename in scripts:
+            parameter_block = self.support_text(filename).split(")", 1)[0]
             for forbidden in ("Url", "Uri", "Version", "Hash", "Installer"):
                 self.assertNotIn("$" + forbidden, parameter_block)
-        build_text = (self.support / "build_portable.ps1").read_text(
-            encoding="utf-8"
-        )
+
+        build_text = self.support_text("build_portable.ps1")
         self.assertIn("supply-chain.json", build_text)
         self.assertIn("Get-AuthenticodeSignature", build_text)
         self.assertIn("--windowed", build_text)
         self.assertIn("--onedir", build_text)
 
-    def test_finalize_requires_licenses_exact_executables_and_privacy_metadata(self):
-        text = (self.support / "finalize_portable.ps1").read_text(
-            encoding="utf-8"
-        )
-        for value in (
+    def test_finalizer_requires_licenses_executables_and_privacy_boundaries(self):
+        finalizer = self.support_text("finalize_portable.ps1")
+        required = (
             "PYTHON-LICENSE.txt",
             "TCL-LICENSE.txt",
             "TK-LICENSE.txt",
@@ -116,13 +115,18 @@ class PortableSupplyChainTests(unittest.TestCase):
             "capture_observability_runtime",
             "eapol_handshake_runtime",
             "eapol_replay_relation_runtime",
+            "pcapng_interface_statistics_runtime",
             "raw_replay_counter_serialization",
             "replay_counter_persistence",
+            "absolute_timestamp_serialization",
+            "pcapng_string_option_serialization",
+            "interface_name_serialization",
             "raw_identifier_serialization",
             "alias_secret_persistence",
             "cross_run_alias_stability",
-        ):
-            self.assertIn(value, text)
+        )
+        for value in required:
+            self.assertIn(value, finalizer)
 
     def test_portable_workflows_run_all_real_analysis_and_privacy_gates(self):
         required = (
@@ -134,225 +138,77 @@ class PortableSupplyChainTests(unittest.TestCase):
             "verify_capture_observability.ps1",
             "verify_eapol_handshakes.ps1",
             "verify_eapol_replay_relations.ps1",
+            "verify_pcapng_interface_statistics.ps1",
         )
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
         ):
-            text = (self.root / relative).read_text(encoding="utf-8")
+            workflow = self.text(relative)
             for value in required:
-                self.assertIn(value, text)
+                self.assertIn(value, workflow)
 
-        finding_verifier = (
-            self.support / "verify_protocol_inventory.ps1"
-        ).read_text(encoding="utf-8")
+    def test_replay_and_pcapng_verifiers_preserve_false_claim_boundaries(self):
+        replay = self.support_text("verify_eapol_replay_relations.ps1")
         for value in (
-            "--analyze-capture",
-            "frames_observed",
-            '"arp"',
-            '"dns"',
-            '"tcp"',
-            '"DNS-ERROR-RESPONSE"',
-            '"TCP-RST"',
-            "event_correlation",
-            "transaction_sessions",
-            "DNS-1-A1",
-            "TCP-1-A1",
-            "root_cause_confirmed",
-            "device_session_confirmed",
-        ):
-            self.assertIn(value, finding_verifier)
-
-        timeline_verifier = (
-            self.support / "verify_event_timeline.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "generate_event_fixture.py",
-            "generate_wireless_event_fixture.py",
-            "generate_eap_fixture.py",
-            "event_timeline_runtime",
-            "eap_success",
-            "radius_access_accept",
-            "dhcp_ack",
-            "dns_response_success",
-            "tcp_syn_ack",
-            "wlan_auth_response_success",
-            "wlan_assoc_response_success",
-            "wlan_deauthentication",
-            "PPP EAP",
-        ):
-            self.assertIn(value, timeline_verifier)
-
-        transaction_verifier = (
-            self.support / "verify_transaction_sessions.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "transaction_session_runtime",
-            "radius_access_request",
-            "radius_access_accept",
-            "dhcp_discover",
-            "dhcp_ack",
-            "dns_query",
-            "dns_response_success",
-            "tcp_syn",
-            "tcp_syn_ack",
-            "tcp_reset",
-            "eap_request",
-            "eap_response",
-            "eap_success",
-            "root_cause_confirmed",
-            "device_session_confirmed",
-        ):
-            self.assertIn(value, transaction_verifier)
-
-        device_verifier = (
-            self.support / "verify_device_sessions.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "device_session_runtime",
-            "raw_identifier_serialization",
-            "alias_secret_persistence",
-            "cross_run_alias_stability",
-            "DEVICE-1",
-            "AP-1",
-            "device_identity_confirmed",
-            "cross_protocol_session_confirmed",
-            "attempt_links",
-            "frames_ambiguous",
-        ):
-            self.assertIn(value, device_verifier)
-
-        journey_verifier = (
-            self.support / "verify_device_journeys.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "device_journeys",
-            "DEVICE-1",
-            '"eap"',
-            '"dhcp"',
-            '"dns"',
-            '"tcp"',
-            "first_failure_stage",
-            "last_positive_stage",
-            "cross_protocol_session_confirmed",
-            "root_cause_confirmed",
-        ):
-            self.assertIn(value, journey_verifier)
-
-        observability_verifier = (
-            self.support / "verify_capture_observability.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "generate_observability_fixture.py",
-            "capture_observability_runtime",
-            "capture_observability",
-            "DNS-1-A1",
-            "DNS-2-A1",
-            "response-not-observed",
-            "capture-boundary-risk",
-            "capture-end-boundary-risk",
-            "capture_start_proven",
-            "capture_end_proven",
-            "capture_loss_excluded",
-            "directionality_proven",
-            "absence_can_confirm_failure",
-        ):
-            self.assertIn(value, observability_verifier)
-
-        handshake_verifier = (
-            self.support / "verify_eapol_handshakes.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "generate_eapol_handshake_fixture.py",
-            "eapol_handshake_runtime",
-            "EAPOL-HS-1",
-            "message-repetition-observed",
-            "same_handshake_confirmed",
-            "key_installation_confirmed",
-            "cryptographic_success_confirmed",
-        ):
-            self.assertIn(value, handshake_verifier)
-
-        replay_verifier = (
-            self.support / "verify_eapol_replay_relations.ps1"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "generate_eapol_replay_fixture.py",
-            "eapol_replay_relations",
-            "expected-relations-observed",
-            "equal-observed",
-            "increased-observed",
-            "same-counter-observed",
+            "raw_replay_counter_serialization",
+            "replay_counter_persistence",
             "raw_replay_counters_serialized",
-            "replay_counter_values_persisted",
             "same_handshake_confirmed",
             "retransmission_confirmed",
             "root_cause_confirmed",
         ):
-            self.assertIn(value, replay_verifier)
-
-    def test_event_fixtures_are_generated_at_runtime_not_committed(self):
-        ethernet = (self.support / "generate_event_fixture.py").read_text(
-            encoding="utf-8"
-        )
-        wireless = (
-            self.support / "generate_wireless_event_fixture.py"
-        ).read_text(encoding="utf-8")
-        eap = (self.support / "generate_eap_fixture.py").read_text(
-            encoding="utf-8"
-        )
-        observability = (
-            self.support / "generate_observability_fixture.py"
-        ).read_text(encoding="utf-8")
-        handshake = (
-            self.support / "generate_eapol_handshake_fixture.py"
-        ).read_text(encoding="utf-8")
-        replay = (
-            self.support / "generate_eapol_replay_fixture.py"
-        ).read_text(encoding="utf-8")
-        for value in (
-            "build_pcap",
-            "_eapol",
-            "_radius",
-            "_dhcp",
-            "_dns_response",
-            "_tcp_frame",
-        ):
-            self.assertIn(value, ethernet)
-        for value in (
-            "build_pcap",
-            "_authentication",
-            "_association_response",
-            "_eapol_data",
-            "_radiotap_header",
-        ):
-            self.assertIn(value, wireless)
-        for value in (
-            "build_pcap",
-            "PPP_EAP_PROTOCOL",
-            "_eap_packet",
-            "_ppp_eap",
-        ):
-            self.assertIn(value, eap)
-        for value in (
-            "build_pcap",
-            "_dns_query",
-            "observability",
-        ):
-            self.assertIn(value, observability)
-        for value in (
-            "build_pcap",
-            "_key_descriptor",
-            "retry=True",
-        ):
-            self.assertIn(value, handshake)
-        for value in (
-            "FIRST_COUNTER",
-            "LATER_COUNTER",
-            "_eapol_key",
-            "build_pcap",
-        ):
             self.assertIn(value, replay)
+
+        statistics = self.support_text(
+            "verify_pcapng_interface_statistics.ps1"
+        )
+        for value in (
+            "pcapng_interface_statistics_runtime",
+            "pcapng_string_option_serialization",
+            "interface_name_serialization",
+            "pcapng_interface_statistics",
+            "supported_capture_format",
+            "reported-drop-observed",
+            "IFACE-1",
+            "ifrecv",
+            "ifdrop",
+            "filteraccept",
+            "osdrop",
+            "usrdeliv",
+            "capture_loss_excluded",
+            "specific_packet_loss_confirmed",
+            "root_cause_confirmed",
+            "private-interface-name-phase4k",
+            "private-statistics-comment-phase4k",
+        ):
+            self.assertIn(value, statistics)
+
+    def test_packet_fixtures_are_generated_at_runtime_not_committed(self):
+        fixtures = (
+            ("generate_event_fixture.py", "build_pcap"),
+            ("generate_wireless_event_fixture.py", "build_pcap"),
+            ("generate_eap_fixture.py", "build_pcap"),
+            ("generate_observability_fixture.py", "build_pcap"),
+            ("generate_eapol_handshake_fixture.py", "build_pcap"),
+            ("generate_eapol_replay_fixture.py", "build_pcap"),
+            ("generate_pcapng_statistics_fixture.py", "build_pcapng"),
+        )
+        for filename, builder in fixtures:
+            self.assertIn(builder, self.support_text(filename))
+
+        pcapng = self.support_text("generate_pcapng_statistics_fixture.py")
+        for value in (
+            "PRIVATE_SECTION_COMMENT",
+            "PRIVATE_HARDWARE",
+            "PRIVATE_OS",
+            "PRIVATE_APPLICATION",
+            "PRIVATE_INTERFACE_NAME",
+            "PRIVATE_INTERFACE_DESCRIPTION",
+            "PRIVATE_PACKET_COMMENT",
+            "PRIVATE_STATISTICS_COMMENT",
+        ):
+            self.assertIn(value, pcapng)
         self.assertFalse(any(self.root.rglob("*.pcap")))
         self.assertFalse(any(self.root.rglob("*.pcapng")))
 

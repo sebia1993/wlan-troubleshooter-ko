@@ -56,6 +56,27 @@ class FakeReplayReport:
         }
 
 
+class FakeStatisticsReport:
+    def to_dict(self):
+        return {
+            "schema_version": 1,
+            "supported_capture_format": False,
+            "complete": True,
+            "state": "unsupported-capture-format",
+            "sections_observed": 0,
+            "interfaces_defined": 0,
+            "statistics_blocks_observed": 0,
+            "interfaces_with_statistics": 0,
+            "interfaces": [],
+            "raw_interface_identifiers_serialized": False,
+            "absolute_timestamps_serialized": False,
+            "capture_loss_excluded": False,
+            "specific_packet_loss_confirmed": False,
+            "root_cause_confirmed": False,
+            "cautions": [],
+        }
+
+
 class CaptureObservabilityServiceTests(unittest.TestCase):
     def structure(self):
         interface = InterfaceSummary(
@@ -144,14 +165,18 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
     @mock.patch("wlan_troubleshooter_ko.analysis.service.run_connection_analysis")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.load_ruleset")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_bundle")
+    @mock.patch(
+        "wlan_troubleshooter_ko.analysis.service.inspect_pcapng_interface_statistics"
+    )
     @mock.patch("wlan_troubleshooter_ko.analysis.service.classify_capture_capabilities")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_capture_structure")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.validate_capture")
-    def test_completed_service_serializes_observability_eapol_and_replay_boundaries(
+    def test_completed_service_serializes_observability_eapol_replay_and_statistics_boundaries(
         self,
         validate_capture_mock,
         inspect_structure_mock,
         classify_mock,
+        statistics_mock,
         bundle_mock,
         rules_mock,
         run_mock,
@@ -173,6 +198,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             validate_capture_mock.return_value = capture
             inspect_structure_mock.return_value = structure
             classify_mock.return_value = self.capabilities()
+            statistics_mock.return_value = FakeStatisticsReport()
             bundle_mock.return_value = SimpleNamespace(code="integrity_verified")
             rules_mock.return_value = {"ruleset_version": "test", "rules": []}
             run_mock.return_value = FakeRun(
@@ -192,6 +218,12 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             serialized = result.to_dict()
 
         self.assertEqual(result.inventory_state, "completed")
+        self.assertIsNotNone(result.pcapng_interface_statistics)
+        statistics = serialized["pcapng_interface_statistics"]
+        self.assertEqual(statistics["schema_version"], 1)
+        self.assertFalse(statistics["supported_capture_format"])
+        self.assertFalse(statistics["capture_loss_excluded"])
+        self.assertFalse(statistics["specific_packet_loss_confirmed"])
         self.assertIsNotNone(result.capture_observability)
         self.assertIsNotNone(result.eapol_handshakes)
         self.assertIsNotNone(result.eapol_replay_relations)
@@ -215,6 +247,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertFalse(replay["retransmission_confirmed"])
         self.assertNotIn(str(capture_path), str(serialized))
         self.assertNotIn(capture_path.name, str(serialized))
+        statistics_mock.assert_called_once_with(capture, cancel_event=None)
         run_mock.assert_called_once()
         replay_mock.assert_called_once()
         self.assertIs(replay_mock.call_args.kwargs["expected_capture"], capture)
@@ -233,6 +266,9 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
     @mock.patch("wlan_troubleshooter_ko.analysis.service.run_connection_analysis")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.load_ruleset")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_bundle")
+    @mock.patch(
+        "wlan_troubleshooter_ko.analysis.service.inspect_pcapng_interface_statistics"
+    )
     @mock.patch("wlan_troubleshooter_ko.analysis.service.classify_capture_capabilities")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_capture_structure")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.validate_capture")
@@ -241,6 +277,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         validate_capture_mock,
         inspect_structure_mock,
         classify_mock,
+        statistics_mock,
         bundle_mock,
         rules_mock,
         run_mock,
@@ -258,6 +295,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             validate_capture_mock.return_value = capture
             inspect_structure_mock.return_value = self.structure()
             classify_mock.return_value = self.capabilities()
+            statistics_mock.return_value = FakeStatisticsReport()
             bundle_mock.return_value = SimpleNamespace(code="integrity_verified")
             rules_mock.return_value = {"ruleset_version": "test", "rules": []}
             run_mock.return_value = FakeRun(
@@ -279,7 +317,9 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertIsNone(result.capture_observability)
         self.assertIsNone(result.eapol_handshakes)
         self.assertIsNone(result.eapol_replay_relations)
+        self.assertIsNotNone(result.pcapng_interface_statistics)
         self.assertIn("후속 분석", result.inventory_message)
+        statistics_mock.assert_called_once_with(capture, cancel_event=None)
         replay_mock.assert_not_called()
 
 

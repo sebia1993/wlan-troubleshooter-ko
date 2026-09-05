@@ -1,6 +1,6 @@
 # 구현 상태
 
-기준 문서: `CODEX_IMPLEMENTATION_PLAN.md`, `docs/PHASE_2A_PLAN.md`부터 `docs/PHASE_4J_PLAN.md`, `docs/adr/0004-analysis-scoped-device-pseudonyms.md`.
+기준 문서: `CODEX_IMPLEMENTATION_PLAN.md`, `docs/PHASE_2A_PLAN.md`부터 `docs/PHASE_4K_PLAN.md`, `docs/adr/0004-analysis-scoped-device-pseudonyms.md`.
 
 ## 현재 상태
 
@@ -14,112 +14,161 @@
 | Phase 4E 단말·AP 가명 | 구현 완료·릴리스 게시 | `DEVICE-N`, `AP-N`, HMAC 키 미저장 |
 | Phase 4F 단말 관찰 여정 | 구현 완료·릴리스 게시 | 실제 프레임 순서와 단계 상태 |
 | Phase 4G 캡처 관찰 가능성 | 구현 완료·릴리스 게시 | 미응답·경계·잘림·불완전 입력 구분 |
-| Phase 4I EAPOL M1~M4 순서 | 구현 완료·`v0.11.0-alpha.1` 게시 | 메시지 순서·반복·Retry 근거 |
-| Phase 4J Replay Counter 관계 | 구현 완료·후보 Windows/Portable 검증 통과 | Counter 원문 미직렬화 관계 분석 |
-| `v0.12.0-alpha.1` | 깨끗한 main 대상 PR 재검증 후 게시 예정 | 관계 전용 Portable 실분석 게이트 |
-| PCAPNG Interface Statistics | 초기 개발 진행 | Phase 4K 초안 PR |
-| 캡처 시간 범위·로밍·RF·HTML | 미착수 | 후속 Phase |
+| Phase 4I EAPOL M1~M4 순서 | 구현 완료·릴리스 게시 | `v0.11.0-alpha.1` |
+| Phase 4J Replay Counter 관계 | 구현 완료·`main` 병합 | `v0.12.0-alpha.1` 릴리스 확인 필요 |
+| Phase 4K PCAPNG 인터페이스 통계 | 구현 완료·Windows/Portable 검증 중 | PR #18 |
+| `v0.13.0-alpha.1` | Phase 4K 검증·병합 후 게시 예정 | Portable 실제 PCAPNG 게이트 |
+| 캡처 상대 시간·장애 구간 포함성 | 미착수 | 다음 Phase 후보 |
+| 로밍·Radiotap RF 분석 | 미착수 | 후속 범위 |
+| 오프라인 HTML 보고서 | 미착수 | 상관 정확도 안정화 이후 |
 
-## Phase 4J 구현
+## Phase 4K 구현
 
-- Wireshark 4.6.8의 `eapol.keydes.replay_counter` 전용 최소 프로파일
-- 원문 Counter를 공개 이벤트·단말 가명·레거시 경로에서 차단
-- 기존 분석과 같은 캡처 SHA-256·TShark 매니페스트 재검증
-- M1/M2·M3/M4 동일·불일치 관계
-- M1→M3 증가·동일·감소 관계
-- 반복 메시지의 같은 Counter·다른 Counter 관계
-- 필드 부재·Counter 누락·근거 생략의 `unavailable`·`partial`
-- GUI `[11. EAPOL Replay Counter 관계]`
-- 기존 최상위 JSON 스키마 2를 유지하는 `eapol_replay_relations`
+- TShark와 독립된 PCAPNG Interface Statistics Block 로컬 파서
+- 기존 `validate_capture`를 이용한 분석 전후 캡처 재검증
+- SHB Byte-Order Magic 기반 섹션별 little/big-endian 처리
+- 블록 앞·뒤 Total Length와 4바이트 정렬 검증
+- IDB 선언과 ISB Interface ID 참조 검증
+- Counter 옵션 길이·중복·패딩·옵션 경계 검증
+- 파일·블록·섹션·인터페이스·ISB·옵션 수 bounded 처리
+- `isb_ifrecv`, `isb_ifdrop`, `isb_filteraccept`, `isb_osdrop`, `isb_usrdeliv`
+- 선언 순서 기반 `IFACE-N`
+- 여러 누적 스냅샷 비합산
+- Counter별 관찰 횟수·첫·마지막 보고값과 변화 방향
+- 일반 PCAP `unsupported-capture-format`
+- TShark 없는 소스 실행 모드에서도 PCAPNG 통계 제공
+- 다운스트림 TShark 실패 시 이미 검증된 PCAPNG 통계 유지
+- GUI `[12. PCAPNG 인터페이스 통계]`
+- 기존 최상위 JSON `schema_version = 2` 유지
 
-## 절대 판정 경계
+## 상태
 
 ```text
-raw_replay_counters_serialized = false
-replay_counter_values_persisted = false
-same_handshake_confirmed = false
-retransmission_confirmed = false
-key_installation_confirmed = false
-cryptographic_success_confirmed = false
-root_cause_confirmed = false
+reported-drop-observed
+zero-reported-drop-counters
+statistics-without-drop-counters
+no-interface-statistics
+unsupported-capture-format
 ```
 
-Counter 관계가 일반적 형태와 일치해도 동일 Handshake, 실제 재전송, 키 설치와 암호학적 성공을 확정하지 않습니다. 관계 불일치는 캡처 누락·여러 교환 혼재 가능성을 포함하므로 AP·단말·RF 장애의 근본 원인으로 확정하지 않습니다.
-
-## 후보 Windows 검증
-
-Phase 4J 기능 기준 Windows CI:
+Counter 변화:
 
 ```text
-Windows Server 2025
-CPython 3.13.15 x64
-전체 테스트 340개 실행
-339개 통과
-플랫폼 제약 테스트 1개 명시적 건너뜀
-오프라인 소스 감사 59개 파일 통과
-저장소 감사 156개 추적 파일 통과
-런타임 의존성 0개
-제품 네트워크 기능 없음
+not-reported
+single-value-observed
+counter-increase-observed
+counter-decrease-observed
+counter-unchanged-observed
 ```
 
-## 후보 Portable 실제 분석
+## 판정 경계
 
-외부 Python·Wireshark를 사용할 수 없는 PATH에서 최종 EXE로 다음 게이트를 모두 통과했습니다.
-
-- DNS 오류·TCP RST Finding과 거래 시도
-- Ethernet·Radiotap IEEE 802.11·PPP EAP 이벤트 타임라인
-- EAP·RADIUS·DHCP·DNS·TCP 거래
-- `DEVICE-N`·`AP-N` 개인정보 경계
-- 단말 가명별 DHCP→DNS→TCP 여정
-- 미응답 DNS와 캡처 종료 경계
-- EAPOL M1→M2→M3→반복 M3→M4
-- Replay Counter 관계 전용 실제 TShark 해석
-
-합성 Counter:
+다음 값은 항상 `false`입니다.
 
 ```text
-M1/M2 = 18446744073709551000
-M3/반복 M3/M4 = 18446744073709551001
+raw_interface_identifiers_serialized
+absolute_timestamps_serialized
+capture_loss_excluded
+specific_packet_loss_confirmed
+root_cause_confirmed
 ```
 
-공개 결과:
+- 드롭 Counter 0은 캡처 무손실 증명이 아닙니다.
+- ISB 부재는 캡처 무손실 증명이 아닙니다.
+- 양수 드롭은 특정 응답 패킷 누락 증명이 아닙니다.
+- 양수 드롭은 RF·AP·단말·SPAN 장애 확정이 아닙니다.
+- Counter 감소는 재시작·초기화·wrap 확정이 아닙니다.
+
+## 개인정보·메타데이터 보호
+
+다음 값은 GUI·JSON·로그·릴리스 자산에 기록하지 않습니다.
 
 ```text
-M1/M2 = equal-observed
-M3/M4 = equal-observed
-M1→M3 = increased-observed
-반복 M3 = same-counter-observed
-state = expected-relations-observed
-```
-
-후보 Portable 자산:
-
-```text
-WlanTroubleshooterKO-v0.12.0-alpha.1-win64-portable.zip
-크기 = 98,539,557 bytes
-SHA-256 = 0273bbc000d3fc0b19ca4d4109c756fcf4c43d61945e09ba3f1ede09501ba3eb
-```
-
-병합 후 `main` 릴리스 워크플로가 다시 빌드하므로 최종 게시 자산의 크기와 SHA-256은 새로 확정합니다.
-
-## 데이터 보호
-
-다음 값은 공개 결과에 기록하지 않습니다.
-
-```text
+인터페이스 이름·설명·GUID·장치 경로
+하드웨어·운영체제·캡처 애플리케이션 문자열
+캡처 필터와 PCAPNG 주석
+ISB Timestamp·starttime·endtime
+원본 MAC·BSSID·SSID
+IP 주소·포트·사용자명·호스트명
 Replay Counter 원문
 Nonce·MIC·Key Data
-원본 MAC·BSSID·SSID
-IP·포트·사용자명·호스트명
 암호화 키·자격 증명
-HMAC 키·내부 토큰
 절대 epoch
 Raw Payload
 캡처 파일명·절대경로
 TShark stderr 원문
 ```
 
-제품 런타임에는 AI·외부 API·네트워크 통신·텔레메트리·자동 업데이트가 없습니다.
+제품 런타임에는 AI·LLM·외부 API·네트워크 통신·텔레메트리·자동 업데이트가 없습니다.
+
+## 단위 검증 범위
+
+- little-endian 두 ISB와 양수 드롭
+- big-endian 0 드롭 Counter
+- ISB 있으나 드롭 옵션 없음
+- 인터페이스 있으나 ISB 없음
+- 다중 섹션의 Interface ID 재시작과 전역 `IFACE-N`
+- Counter 증가·감소·변화 없음·단일 관찰
+- 일반 PCAP 비적용 상태
+- 선언되지 않은 Interface ID 거부
+- 같은 ISB의 중복 Counter 거부
+- 8바이트가 아닌 Counter 거부
+- 앞·뒤 Total Length 불일치 거부
+- 옵션 패딩 오류 거부
+- 취소 처리
+- 분석 전후 캡처 지문 변경 거부
+- 민감한 문자열 옵션 비직렬화
+- GUI의 항목 미보고와 0 보고값 구분
+- 서비스의 TShark 독립 통계 보존
+
+## Portable 실제 분석
+
+런타임 생성 PCAPNG:
+
+```text
+SHB 1개
+IDB 1개
+EPB 2개
+ISB 2개
+```
+
+첫 ISB:
+
+```text
+ifrecv=2
+ifdrop=0
+filteraccept=2
+osdrop=0
+usrdeliv=2
+```
+
+둘째 ISB:
+
+```text
+ifrecv=4
+ifdrop=3
+filteraccept=4
+osdrop=1
+usrdeliv=4
+```
+
+기대 공개 결과:
+
+```text
+IFACE-1
+statistics_blocks=2
+state=reported-drop-observed
+ifrecv 2→4
+ifdrop 0→3
+osdrop 0→1
+capture_loss_excluded=false
+specific_packet_loss_confirmed=false
+root_cause_confirmed=false
+```
+
+fixture에는 인터페이스 이름·설명, 하드웨어, 운영체제, 캡처 애플리케이션, 패킷·통계 주석, 절대 시작·종료 시각과 원본 MAC·IP를 넣습니다. 최종 JSON에서 이 값이 발견되면 검증을 실패시킵니다.
+
+외부 Python·Wireshark를 사용할 수 없도록 환경변수와 PATH를 제한하며 분석 전후 Portable 폴더 무변경도 검사합니다.
 
 ## 고정 공급망
 
@@ -131,12 +180,13 @@ TShark stderr 원문
 
 ## 남은 개발
 
-- Phase 4J를 `main` 단일 부모의 깨끗한 PR로 재검증·병합
-- `v0.12.0-alpha.1` 게시 자산의 최종 SHA-256·크기 확인
-- Phase 4K PCAPNG Interface Statistics Block 완성
-- 캡처 첫→마지막 상대 시간과 ISB 시간 해상도 결합
-- 프레임별 비식별 `DEVICE-N ↔ AP-N` 링크와 로밍 관찰
-- Radiotap RSSI·채널·데이터율·Retry RF 관찰
+- PR #18 최신 HEAD의 Windows CI·Portable 최종 통과
+- Phase 4K PR Draft 해제·`main` 병합
+- `v0.13.0-alpha.1` 게시와 최종 ZIP SHA-256 확인
+- PCAP·PCAPNG 첫→마지막 상대 시간 범위
+- 캡처 시작·종료가 장애 구간을 포함했는지 보수적 판단 보강
+- 프레임별 비식별 DEVICE/AP 로밍 관찰
+- Radiotap RSSI·채널·데이터율 RF 분석
 - Aruba Controller·ClearPass 맞춤 점검 안내
 - 오프라인 단일 HTML 보고서
 - 실제 사내 캡처·EDR·Outbound 차단 환경 검증

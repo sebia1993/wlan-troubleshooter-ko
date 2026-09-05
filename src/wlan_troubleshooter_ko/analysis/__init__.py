@@ -1,4 +1,4 @@
-"""결정론적 캡처 점검부터 EAPOL 관계 분석까지의 공개 API."""
+"""결정론적 캡처 점검부터 PCAPNG 통계·EAPOL 관계까지의 공개 API."""
 
 from wlan_troubleshooter_ko.analysis.capture_observability import (
     CaptureObservabilityError,
@@ -19,8 +19,6 @@ DeviceJourneyStage = _device_journeys.DeviceJourneyStage
 build_device_journeys = wrap_device_journey_builder(
     _device_journeys.build_device_journeys
 )
-# Direct imports used by the TShark orchestration and tests must receive the
-# same safety boundary before service.py imports tshark.inventory.
 _device_journeys.build_device_journeys = build_device_journeys
 
 from wlan_troubleshooter_ko.analysis.device_sessions import (
@@ -64,6 +62,15 @@ from wlan_troubleshooter_ko.analysis.models import (
     CaptureStructureError,
     InterfaceSummary,
 )
+from wlan_troubleshooter_ko.analysis.pcapng_interface_statistics import (
+    CounterObservation,
+    InterfaceStatistics,
+    PcapngInterfaceStatisticsError,
+    PcapngInterfaceStatisticsReport,
+)
+from wlan_troubleshooter_ko.analysis.pcapng_statistics_service import (
+    inspect_pcapng_interface_statistics,
+)
 from wlan_troubleshooter_ko.analysis.preflight import (
     classify_capture_capabilities,
     inspect_capture_structure,
@@ -94,6 +101,7 @@ __all__ = [
     "CaptureObservabilityReport",
     "CaptureStructure",
     "CaptureStructureError",
+    "CounterObservation",
     "DeviceAttemptLink",
     "DeviceJourney",
     "DeviceJourneyError",
@@ -115,7 +123,10 @@ __all__ = [
     "EventTimelineError",
     "EventTypeSummary",
     "IncompleteAttemptAssessment",
+    "InterfaceStatistics",
     "InterfaceSummary",
+    "PcapngInterfaceStatisticsError",
+    "PcapngInterfaceStatisticsReport",
     "ProtocolEvent",
     "ProtocolInventory",
     "ProtocolInventoryError",
@@ -139,4 +150,5 @@ __all__ = [
     "build_transaction_sessions",
     "classify_capture_capabilities",
     "inspect_capture_structure",
+    "inspect_pcapng_interface_statistics",
 ]
