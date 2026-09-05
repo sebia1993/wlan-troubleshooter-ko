@@ -124,7 +124,7 @@ def _validate_prepared_isolation(prepared: _PreparedIsolation) -> None:
         if (
             _stat_is_link_or_reparse(root_before)
             or not stat.S_ISDIR(root_before.st_mode)
-            or _stat_snapshot(root_before) != prepared.root_snapshot
+            or not _same_directory_identity(root_before, prepared.root_snapshot)
         ):
             raise TSharkExecutionError("격리 작업공간 정체성이 변경됐습니다.")
 
@@ -148,7 +148,7 @@ def _validate_prepared_isolation(prepared: _PreparedIsolation) -> None:
             if (
                 _stat_is_link_or_reparse(directory_before)
                 or not stat.S_ISDIR(directory_before.st_mode)
-                or _stat_snapshot(directory_before) != expected_snapshot
+                or not _same_directory_identity(directory_before, expected_snapshot)
             ):
                 raise TSharkExecutionError("격리 하위 경로 정체성이 변경됐습니다.")
             with os.scandir(directory) as entries:
@@ -157,11 +157,11 @@ def _validate_prepared_isolation(prepared: _PreparedIsolation) -> None:
                         "격리 하위 경로에는 Lua, plugin, config 파일을 둘 수 없습니다."
                     )
             directory_after = os.lstat(directory)
-            if _stat_snapshot(directory_after) != expected_snapshot:
+            if not _same_directory_identity(directory_after, expected_snapshot):
                 raise TSharkExecutionError("격리 하위 경로가 확인 중 변경됐습니다.")
 
         root_after = os.lstat(prepared.root)
-        if _stat_snapshot(root_after) != prepared.root_snapshot:
+        if not _same_directory_identity(root_after, prepared.root_snapshot):
             raise TSharkExecutionError("격리 작업공간이 확인 중 변경됐습니다.")
     except TSharkExecutionError:
         raise
