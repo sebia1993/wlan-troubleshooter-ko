@@ -1,207 +1,232 @@
-# Phase 4K 실행 계획 — PCAPNG Interface Statistics Block 관찰
+# Phase 4K 실행 계획 — PCAPNG Interface Statistics Block 비식별 분석
 
 ## 목적
 
-Phase 4K는 PCAPNG의 Interface Statistics Block(ISB, Block Type 5)을 로컬에서 직접 해석하여 캡처 도구가 기록한 인터페이스별 통계 카운터를 한국어로 제공합니다.
+PCAPNG Interface Statistics Block(ISB)을 로컬에서 직접 해석해 캡처 도구가 보고한 인터페이스별 수신·드롭 Counter를 한국어로 제공합니다.
 
-드롭 카운터가 없거나 0이라고 해서 캡처 손실이 없었다고 확정하지 않습니다. 0보다 큰 드롭 카운터가 있어도 특정 장애 패킷이 누락됐거나 해당 드롭이 장애 원인이라고 확정하지 않습니다.
+드롭 Counter가 없거나 0이라고 해서 캡처 손실이 없었다고 확정하지 않습니다. 양수 드롭 Counter가 있어도 특정 장애 패킷이 누락됐거나 RF·AP·단말·SPAN이 원인이라고 확정하지 않습니다.
 
-## 입력 경계
+## 입력·실행 경계
 
-기존 bounded PCAPNG 컨테이너 스캐너에서 다음 블록만 추가 해석합니다.
-
-```text
-Interface Statistics Block = 0x00000005
-```
-
-ISB 고정 본문:
+입력은 기존 `validate_capture`를 통과한 로컬 `CaptureInfo`뿐입니다.
 
 ```text
-Interface ID       32-bit
-Timestamp High     32-bit
-Timestamp Low      32-bit
-Options             32-bit aligned
+로컬 절대경로
+PCAP 또는 PCAPNG 형식
+파일 크기
+SHA-256
 ```
 
-지원 옵션:
+ISB 분석 전후에 `validate_capture`를 다시 실행하여 링크·재분석 지점·파일 정체성·형식·크기·SHA-256이 기존 값과 같은지 확인합니다.
+
+ISB 해석은 Python 표준 라이브러리로 수행합니다. TShark·AI·외부 API·네트워크 통신을 추가로 사용하지 않습니다. 따라서 내장 TShark가 없는 소스 실행 모드에서도 PCAPNG 통계 보고서를 제공합니다.
+
+## 해석 구조
+
+필요한 PCAPNG 블록:
 
 ```text
-isb_starttime       code 2, length 8
-isb_endtime         code 3, length 8
-isb_ifrecv          code 4, length 8
-isb_ifdrop          code 5, length 8
-isb_filteraccept    code 6, length 8
-isb_osdrop          code 7, length 8
-isb_usrdeliv        code 8, length 8
+Section Header Block           0x0A0D0D0A
+Interface Description Block    0x00000001
+Interface Statistics Block     0x00000005
 ```
 
-원본 인터페이스 이름·설명·운영체제 정보는 읽거나 결과에 기록하지 않습니다.
+지원하는 표준 unsigned 64-bit Counter 옵션:
 
-## 결과 모델
+| 옵션 | 코드 |
+|---|---:|
+| `isb_ifrecv` | 4 |
+| `isb_ifdrop` | 5 |
+| `isb_filteraccept` | 6 |
+| `isb_osdrop` | 7 |
+| `isb_usrdeliv` | 8 |
 
-각 ISB를 다음과 같은 관찰 객체로 유지합니다.
+ISB Timestamp, `isb_starttime`, `isb_endtime`과 문자열 옵션은 공개 결과에 기록하지 않습니다.
 
-```text
-section_index
-interface_id
-observation_index
-counter_state
-ifrecv
-ifdrop
-filteraccept
-osdrop
-usrdeliv
-start_time_present
-end_time_present
-block_timestamp_present
-absolute_timestamps_serialized = false
-capture_loss_excluded = false
-root_cause_confirmed = false
-```
+## 구조 검증
 
-동일 인터페이스에 여러 ISB가 있으면 각각 별도 관찰로 유지합니다. 카운터가 누적값일 수 있으므로 블록 간 값을 단순 합산하지 않습니다.
+- SHB Byte-Order Magic으로 섹션별 little/big-endian을 결정합니다.
+- 블록 앞·뒤 Total Length가 일치해야 합니다.
+- 블록 길이는 4바이트 정렬이어야 합니다.
+- 블록·옵션이 파일 또는 블록 경계를 벗어나면 거부합니다.
+- ISB는 같은 섹션에서 먼저 선언된 Interface ID만 참조할 수 있습니다.
+- 지원 Counter 옵션 길이는 정확히 8바이트여야 합니다.
+- 같은 ISB의 동일 Counter 옵션 중복을 거부합니다.
+- 옵션 패딩은 0이어야 합니다.
+- 파일·블록·섹션·인터페이스·ISB·옵션 수에 상한을 적용합니다.
+- 알 수 없는 블록·옵션은 구조만 확인하고 내용을 직렬화하지 않습니다.
 
-GUI에서는 실제 인터페이스 이름 대신 분석 실행 내 표시용 별칭을 사용합니다.
+## 인터페이스 가명
+
+IDB 선언 순서로 다음 표시 가명을 만듭니다.
 
 ```text
 IFACE-1
 IFACE-2
 ```
 
-별칭은 Section Index와 Interface ID를 정렬한 순서로 결정하며 원본 이름을 의미하지 않습니다.
+`section_index`와 숫자 `interface_id`는 PCAPNG 내부 참조 위치이며 실제 인터페이스 이름·GUID·장치 경로가 아닙니다. 실제 문자열 식별자는 출력하지 않습니다.
 
-## Counter 상태
+## 여러 ISB 처리
 
-| 상태 | 의미 |
-|---|---|
-| `reported-drop-observed` | `ifdrop` 또는 `osdrop` 중 하나 이상이 0보다 큼 |
-| `zero-reported-drop-counters` | 드롭 카운터가 하나 이상 제공됐고 제공된 값이 모두 0임 |
-| `statistics-without-drop-counters` | ISB는 있지만 `ifdrop`·`osdrop` 옵션이 없음 |
-| `no-interface-statistics` | 전체 캡처에 ISB가 없음 |
-
-다음 해석은 금지합니다.
+Counter는 누적 스냅샷일 수 있으므로 ISB 값을 합산하지 않습니다. Counter별로 다음만 제공합니다.
 
 ```text
-ifdrop = 0 → 캡처 무손실
-osdrop = 0 → 커널·드라이버 드롭 없음
-ISB 없음 → 캡처 손실 없음
-드롭 증가 → 특정 EAPOL·DHCP·DNS 패킷 누락 확정
-드롭 증가 → RF·AP·단말 장애 확정
+observations
+first_value
+last_value
+progression
 ```
 
-## 옵션 검증
-
-- 모든 옵션은 32-bit padding 경계를 검증합니다.
-- 카운터·시간 옵션은 길이 8일 때만 해석합니다.
-- 길이가 다르면 값을 사용하지 않고 안전 경고를 남깁니다.
-- 동일 ISB 안에서 같은 지원 옵션이 중복되면 실패-폐쇄 처리합니다.
-- End-of-Options(code 0)는 길이 0이어야 합니다.
-- 정의되지 않은 Interface ID를 참조한 ISB는 카운터를 연결하지 않고 경고합니다.
-- ISB 최소 전체 길이는 24바이트입니다.
-- 기존 최대 블록 길이·최대 레코드 수·취소 경계를 유지합니다.
-
-## 시간 값 경계
-
-ISB Timestamp, `isb_starttime`, `isb_endtime`의 원본 값은 절대 시간일 수 있으므로 공개 결과에 숫자를 기록하지 않습니다.
-
-Phase 4K에서는 존재 여부만 제공합니다.
+변화 상태:
 
 ```text
-block_timestamp_present
-start_time_present
-end_time_present
-absolute_timestamps_serialized = false
+not-reported
+single-value-observed
+counter-increase-observed
+counter-decrease-observed
+counter-unchanged-observed
 ```
 
-상대 지속시간 변환은 인터페이스별 `if_tsresol`과 `if_tsoffset`까지 함께 검증하는 후속 단계에서 추가합니다.
+Counter 감소는 초기화·재시작·wrap·여러 수집 상태 가능성을 포함합니다. 어느 하나로 확정하지 않습니다.
 
-## 개인정보·데이터 반출 방지
-
-다음 값을 GUI·JSON·로그·릴리스 자산에 기록하지 않습니다.
+## 드롭 상태
 
 ```text
-인터페이스 이름·설명
-운영체제 문자열
+reported-drop-observed
+zero-reported-drop-counters
+statistics-without-drop-counters
+no-interface-statistics
+unsupported-capture-format
+```
+
+- `reported-drop-observed`: `ifdrop` 또는 `osdrop`에서 양수 값 관찰
+- `zero-reported-drop-counters`: 드롭 Counter가 있고 관찰값이 모두 0
+- `statistics-without-drop-counters`: ISB는 있으나 드롭 Counter 옵션 없음
+- `no-interface-statistics`: PCAPNG에 ISB가 없음
+- `unsupported-capture-format`: 일반 PCAP
+
+## 절대 판정 경계
+
+다음 값은 항상 `false`입니다.
+
+```text
+raw_interface_identifiers_serialized
+absolute_timestamps_serialized
+capture_loss_excluded
+specific_packet_loss_confirmed
+root_cause_confirmed
+```
+
+금지하는 자동 결론:
+
+```text
+ifdrop=0 또는 osdrop=0 → 캡처 무손실
+ISB 없음 → 캡처 무손실
+양수 드롭 → 특정 EAPOL·DHCP·DNS·TCP 패킷 누락
+양수 드롭 → RF·AP·단말·SPAN 장애
+Counter 감소 → 초기화·재시작·wrap 확정
+```
+
+## 개인정보·메타데이터 보호
+
+GUI·JSON·로그·릴리스 자산에 다음 값을 기록하지 않습니다.
+
+```text
+인터페이스 이름·설명·GUID·장치 경로
+하드웨어·운영체제·캡처 애플리케이션 문자열
+캡처 필터
+Section·Interface·Packet·Statistics 주석
+ISB Timestamp·starttime·endtime
 원본 MAC·BSSID·SSID
 IP 주소·포트·사용자명·호스트명
-절대 타임스탬프
-캡처 파일명·절대경로
+절대 epoch
 Raw Payload
-TShark stderr 원문
+캡처 파일명·절대경로
 ```
 
-ISB 해석은 Python 표준 라이브러리로 로컬 파일을 읽으며 TShark·네트워크·외부 API·AI를 추가로 사용하지 않습니다.
+## 단위 검증
 
-## 자동 검증
+- little-endian 두 ISB와 양수 드롭
+- big-endian 0 드롭 Counter
+- ISB 있으나 드롭 옵션 없음
+- PCAPNG에 ISB 없음
+- 일반 PCAP 비적용 상태
+- 다중 섹션·Interface ID 재시작·전역 `IFACE-N`
+- 증가·감소·변화 없음·단일 Counter 관찰
+- 선언되지 않은 Interface ID 거부
+- 중복 Counter 옵션 거부
+- 8바이트가 아닌 Counter 거부
+- 앞·뒤 Total Length 불일치 거부
+- 옵션 padding 오류 거부
+- 분석 취소
+- 분석 전후 캡처 변경 거부
+- 민감 문자열·절대 시각·경로 비노출
+- TShark 실패 시 독립 통계 보고서 보존
 
-### 단위 테스트
+## Portable 실제 검증
 
-- Little-endian·Big-endian ISB
-- `ifrecv`, `ifdrop`, `filteraccept`, `osdrop`, `usrdeliv` 해석
-- 0보다 큰 드롭 → `reported-drop-observed`
-- 제공된 드롭 값이 모두 0 → `zero-reported-drop-counters`
-- 드롭 옵션 없음 → `statistics-without-drop-counters`
-- ISB 없음 → 캡처 전체 `no-interface-statistics`
-- 여러 인터페이스·여러 Section의 관찰 분리
-- 동일 인터페이스 여러 ISB 비합산
-- 정의되지 않은 Interface ID 경고
-- 잘못된 옵션 길이 경고 및 값 미사용
-- 중복 지원 옵션 거부
-- 옵션 padding·블록 trailing length 검증
-- 결정론적 직렬화와 인터페이스 이름·절대 시간 비노출
-
-### Portable 실제 검증
-
-런타임에 다음 PCAPNG를 생성합니다.
+런타임 생성 PCAPNG:
 
 ```text
-Section Header Block
-Interface Description Block: Ethernet
-Enhanced Packet Block 2개
-Interface Statistics Block 1개
+SHB 1개
+IDB 1개
+Ethernet EPB 2개
+ISB 2개
 ```
 
-ISB 합성 값:
+첫 ISB:
 
 ```text
-ifrecv = 2
-ifdrop = 3
-filteraccept = 2
-osdrop = 1
-usrdeliv = 2
+ifrecv=2
+ifdrop=0
+filteraccept=2
+osdrop=0
+usrdeliv=2
 ```
 
-최종 EXE 기대 결과:
+둘째 ISB:
+
+```text
+ifrecv=4
+ifdrop=3
+filteraccept=4
+osdrop=1
+usrdeliv=4
+```
+
+기대 공개 결과:
 
 ```text
 IFACE-1
-counter_state = reported-drop-observed
-ifrecv = 2
-ifdrop = 3
-filteraccept = 2
-osdrop = 1
-usrdeliv = 2
-capture_loss_excluded = false
-root_cause_confirmed = false
-absolute_timestamps_serialized = false
+statistics_blocks=2
+state=reported-drop-observed
+ifrecv first=2 last=4 progression=counter-increase-observed
+ifdrop first=0 last=3 progression=counter-increase-observed
+osdrop first=0 last=1 progression=counter-increase-observed
+capture_loss_excluded=false
+specific_packet_loss_confirmed=false
+root_cause_confirmed=false
 ```
 
-Python·Wireshark가 없는 PATH에서 실행하고 캡처 경로·인터페이스 이름·절대 시간 비노출 및 분석 전후 Portable 폴더 무변경을 확인합니다.
+fixture에는 인터페이스 이름·설명, 하드웨어, 운영체제, 캡처 애플리케이션, 패킷·통계 주석, 절대 시작·종료 시각과 원본 MAC·IP를 넣습니다. 최종 JSON에서 하나라도 발견되면 검증을 실패시킵니다.
+
+외부 Python·Wireshark를 사용할 수 없는 PATH에서 최종 EXE를 실행하고 분석 전후 Portable 폴더 무변경도 확인합니다.
 
 ## 완료 기준
 
 - Windows 전체 테스트·자체 점검·소스 감사·저장소 감사 통과
-- PCAPNG ISB bounded parser와 한국어 GUI 결과 제공
-- 기존 분석 JSON 최상위 `schema_version = 2` 유지
-- 기존 Finding·거래·DEVICE-N·EAPOL·Replay Counter 관계 게이트 유지
-- Portable 실제 PCAPNG ISB 검증 통과
-- 다음 프리릴리스 게시
+- Python·Wireshark 미설치 Portable 실제 PCAPNG 분석 통과
+- GUI `[12. PCAPNG 인터페이스 통계]`
+- 최상위 분석 JSON `schema_version = 2` 유지
+- 기존 Finding·DEVICE-N·미응답·EAPOL·Replay 관계 게이트 유지
+- `v0.13.0-alpha.1` Win64 Portable 프리릴리스 게시
 
 ## 다음 단계
 
-1. PCAP·PCAPNG 패킷 타임스탬프의 첫→마지막 상대 시간 범위
-2. `if_tsresol`·`if_tsoffset`을 포함한 ISB 시작·종료 상대 지속시간
-3. 캡처 경계와 미응답 거래의 대기시간 결합
+1. PCAP·PCAPNG 첫→마지막 패킷 상대 시간 범위
+2. `if_tsresol`·`if_tsoffset`과 ISB 상대 시간
+3. 캡처 경계와 미응답 거래의 관찰 시간 결합
 4. 프레임별 비식별 `DEVICE-N ↔ AP-N` 연결과 로밍 관찰
 5. Radiotap RSSI·채널·데이터율 기반 RF 관찰
 6. Aruba·ClearPass 맞춤 점검 안내
