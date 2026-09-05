@@ -66,7 +66,7 @@ class AppSmokeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             main(["--self-check-output=https://example.invalid/output.json"])
 
-    def test_noninteractive_analysis_writes_path_free_result(self):
+    def test_noninteractive_analysis_writes_path_free_statistics_result(self):
         with tempfile.TemporaryDirectory() as directory:
             capture = Path(directory).resolve() / "private-capture.pcap"
             output = Path(directory).resolve() / "analysis.json"
@@ -84,14 +84,16 @@ class AppSmokeTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertEqual(value["schema_version"], 2)
             self.assertEqual(value["protocol_inventory_state"], "unavailable")
+            statistics = value["pcapng_interface_statistics"]
+            self.assertEqual(statistics["schema_version"], 1)
+            self.assertFalse(statistics["supported_capture_format"])
+            self.assertEqual(statistics["state"], "unsupported-capture-format")
+            self.assertFalse(statistics["capture_loss_excluded"])
+            self.assertFalse(statistics["specific_packet_loss_confirmed"])
+            self.assertFalse(statistics["root_cause_confirmed"])
             self.assertIsNone(value["capture_observability"])
             self.assertIsNone(value["eapol_handshakes"])
             self.assertIsNone(value["eapol_replay_relations"])
-            self.assertEqual(value["structure"]["interface_statistics"], [])
-            self.assertEqual(
-                value["structure"]["interface_statistics_state"],
-                "no-interface-statistics",
-            )
             self.assertNotIn(str(capture), rendered)
             self.assertNotIn(capture.name, rendered)
 
@@ -115,6 +117,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("EAPOL 4-Way Handshake", state.detail)
             self.assertIn("Replay Counter 관계", state.detail)
             self.assertIn("PCAPNG 인터페이스 통계", state.detail)
+            self.assertIn("일반 PCAP", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)
