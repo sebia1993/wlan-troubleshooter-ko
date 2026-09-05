@@ -67,8 +67,10 @@ class Phase4KPortableTests(unittest.TestCase):
             "capture_loss_excluded",
             "specific_packet_loss_confirmed",
             "root_cause_confirmed",
-            "Corp-WLAN-Private-Adapter",
-            "Internal monitor path",
+            "private-interface-name-phase4k",
+            "private-interface-description-phase4k",
+            "private-capture-application-phase4k",
+            "private-statistics-comment-phase4k",
         ):
             self.assertIn(value, text)
 
@@ -77,11 +79,14 @@ class Phase4KPortableTests(unittest.TestCase):
             "tests/portable_build/generate_pcapng_statistics_fixture.py"
         )
         for value in (
+            "PRIVATE_SECTION_COMMENT",
+            "PRIVATE_HARDWARE",
+            "PRIVATE_OS",
+            "PRIVATE_APPLICATION",
             "PRIVATE_INTERFACE_NAME",
             "PRIVATE_INTERFACE_DESCRIPTION",
-            "START_TIME",
-            "END_TIME",
-            "BLOCK_TIME",
+            "PRIVATE_PACKET_COMMENT",
+            "PRIVATE_STATISTICS_COMMENT",
             "_interface_statistics",
             "build_pcapng",
         ):
