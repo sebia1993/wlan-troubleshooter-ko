@@ -293,13 +293,18 @@ class Phase4RuntimeTests(unittest.TestCase):
             capture.name,
             "192.0.2",
             "1700000000",
-            "frame.time_epoch",
             "02:00:00:00:00:10",
             "02:00:00:00:00:20",
             "020000000010",
             '"replay_counter":',
         ):
             self.assertNotIn(forbidden, text)
+        timing_text = json.dumps(
+            serialized["capture_time_boundaries"],
+            ensure_ascii=False,
+        )
+        self.assertNotIn("frame.time_epoch", timing_text)
+        self.assertNotIn("1700000000", timing_text)
         self.assertEqual(serialized["schema_version"], 2)
         self.assertEqual(
             serialized["protocol_inventory"]["inventory"]["frames_observed"],
