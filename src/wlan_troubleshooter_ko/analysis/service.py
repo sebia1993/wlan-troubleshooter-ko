@@ -33,6 +33,8 @@ from wlan_troubleshooter_ko.analysis.models import (
 from wlan_troubleshooter_ko.analysis.pcapng_interface_statistics import (
     PcapngInterfaceStatisticsError,
     PcapngInterfaceStatisticsReport,
+)
+from wlan_troubleshooter_ko.analysis.pcapng_statistics_service import (
     inspect_pcapng_interface_statistics,
 )
 from wlan_troubleshooter_ko.analysis.preflight import (
