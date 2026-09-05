@@ -76,6 +76,7 @@ class TransactionTimeBoundary:
     response_wait_sufficiency_assessed: bool = False
     response_absence_confirmed: bool = False
     root_cause_confirmed: bool = False
+    duration_evidence_complete: bool = True
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -91,6 +92,7 @@ class TransactionTimeBoundary:
             "start_near_boundary": self.start_near_boundary,
             "end_near_boundary": self.end_near_boundary,
             "display_filter": self.display_filter,
+            "duration_evidence_complete": self.duration_evidence_complete,
             "response_wait_sufficiency_assessed": self.response_wait_sufficiency_assessed,
             "response_absence_confirmed": self.response_absence_confirmed,
             "root_cause_confirmed": self.root_cause_confirmed,
@@ -173,6 +175,8 @@ def _parse_uint(value: str, label: str) -> int:
     raw = value.strip()
     if not raw or not raw.isascii() or not raw.isdecimal():
         raise CaptureTimeBoundaryError(label + " 값이 올바른 정수가 아닙니다.")
+    if len(raw) > 19:
+        raise CaptureTimeBoundaryError(label + " 값이 허용 범위를 벗어났습니다.")
     parsed = int(raw, 10)
     if parsed < 0 or parsed > _MAX_INTEGER:
         raise CaptureTimeBoundaryError(label + " 값이 허용 범위를 벗어났습니다.")
@@ -221,16 +225,27 @@ def build_capture_time_index(
         type(expected_frames) is not int or expected_frames < 0
     ):
         raise CaptureTimeBoundaryError("예상 프레임 수가 올바르지 않습니다.")
-    positions = {
-        item.output_key: index for index, item in enumerate(profile.fields)
-    }
-    if set(positions) != {"frame_number", "time_epoch"}:
+    # Check field names as well as output aliases; a dict alone silently
+    # collapses duplicate aliases and could conceal an unreviewed field.
+    approved_fields = (
+        ("frame_number", "frame.number"),
+        ("time_epoch", "frame.time_epoch"),
+    )
+    if (
+        tuple((item.output_key, item.field_name) for item in profile.fields)
+        != approved_fields
+        or profile.display_filter_name != "capture-overview"
+        or profile.missing_optional_fields != ()
+        or type(profile.max_packets) is not int
+        or not 1 <= profile.max_packets <= 500_000
+    ):
         raise CaptureTimeBoundaryError(
             "캡처 상대 시간 필드 구성이 승인된 최소 프로파일과 다릅니다."
         )
 
+    positions = {key: position for position, (key, _name) in enumerate(approved_fields)}
     first_epoch: Optional[int] = None
-    previous_epoch: Optional[int] = None
+    previous_order_key: Optional[Tuple[int, int]] = None
     previous_frame = 0
     relative_values = []
     regressions = 0
@@ -246,16 +261,21 @@ def build_capture_time_index(
                 raise CaptureTimeBoundaryError(
                     "프레임 번호가 1부터 연속 증가하지 않습니다."
                 )
-            epoch = _parse_epoch_microseconds(
-                row[positions["time_epoch"]]
-            )
+            epoch_text = row[positions["time_epoch"]]
+            epoch = _parse_epoch_microseconds(epoch_text)
+            # Retain the established event/transaction millisecond contract,
+            # but compare all accepted fractional digits before truncation.
+            # This detects nanosecond regressions even when both display 0ms.
+            whole, _separator, fraction = epoch_text.strip().partition(".")
+            order_key = (int(whole, 10), int(fraction.ljust(18, "0"), 10))
             if first_epoch is None:
                 first_epoch = epoch
-            if previous_epoch is not None and epoch < previous_epoch:
+            if previous_order_key is not None and order_key < previous_order_key:
                 regressions += 1
-                regression_frames.append(frame)
+                if len(regression_frames) < _MAX_EVIDENCE_FRAMES:
+                    regression_frames.append(frame)
             relative_values.append((epoch - first_epoch) // 1000)
-            previous_epoch = epoch
+            previous_order_key = order_key
             previous_frame = frame
     except FieldsOutputError as exc:
         raise CaptureTimeBoundaryError(str(exc)) from exc
@@ -302,7 +322,7 @@ def build_capture_time_index(
         regression_evidence_frames=evidence,
         regression_evidence_frames_omitted=max(
             0,
-            len(regression_frames) - len(evidence),
+            regressions - len(evidence),
         ),
     )
 
@@ -367,6 +387,61 @@ def _attempts(transaction_report: object) -> Tuple[Tuple[object, ...], bool]:
     return tuple(values), complete
 
 
+def _validate_transaction_duration(
+    index: CaptureTimeIndex,
+    attempt: object,
+    first_frame: int,
+    last_frame: int,
+    duration_ms: int,
+    endpoint_delta_ms: int,
+) -> bool:
+    """Validate the source's max-minus-min duration, not just its endpoints.
+
+    TransactionSessionReport uses extrema over transaction event frames. On
+    a regressing clock, endpoint subtraction is not that duration. Omitted
+    evidence permits bounds only, and explicitly lowers result completeness.
+    """
+
+    if not index.timestamp_regressions or first_frame == last_frame:
+        if duration_ms != endpoint_delta_ms:
+            raise CaptureTimeBoundaryError(
+                "거래 시도 지속시간과 상대 시간 프레임 근거가 일치하지 않습니다."
+            )
+        return True
+
+    frames = getattr(attempt, "evidence_frames", None)
+    omitted = getattr(attempt, "evidence_frames_omitted", None)
+    if (
+        not isinstance(frames, (tuple, list))
+        or not 1 <= len(frames) <= _MAX_EVIDENCE_FRAMES
+        or type(omitted) is not int
+        or not 0 <= omitted <= index.frames_observed
+        or any(type(frame) is not int or not first_frame <= frame <= last_frame
+               for frame in frames)
+    ):
+        raise CaptureTimeBoundaryError("시간 역행 거래의 프레임 근거가 올바르지 않습니다.")
+    ordered = tuple(frames)
+    if (
+        tuple(sorted(set(ordered))) != ordered
+        or ordered[0] != first_frame
+        or (omitted == 0 and ordered[-1] != last_frame)
+    ):
+        raise CaptureTimeBoundaryError("시간 역행 거래의 근거 순서·범위가 일치하지 않습니다.")
+    times = [index.frame_relative_ms[frame - 1] for frame in ordered]
+    times.append(index.frame_relative_ms[last_frame - 1])
+    observed_span = max(times) - min(times)
+    if omitted == 0:
+        consistent = duration_ms == observed_span
+    else:
+        consistent = (
+            index.observed_span_ms is not None
+            and observed_span <= duration_ms <= index.observed_span_ms
+        )
+    if not consistent:
+        raise CaptureTimeBoundaryError("시간 역행 거래의 지속시간이 프레임 근거와 다릅니다.")
+    return omitted == 0
+
+
 def _build_transaction_boundary(
     index: CaptureTimeIndex,
     attempt: object,
@@ -391,11 +466,11 @@ def _build_transaction_boundary(
     ):
         raise CaptureTimeBoundaryError("거래 시도 ID가 올바르지 않습니다.")
     expected_protocol = attempt_id.split("-", 1)[0].casefold()
-    if protocol != expected_protocol or protocol not in _ALLOWED_PROTOCOLS:
+    if not isinstance(protocol, str) or protocol != expected_protocol or protocol not in _ALLOWED_PROTOCOLS:
         raise CaptureTimeBoundaryError(
             "거래 시도 ID와 프로토콜이 일치하지 않습니다."
         )
-    if state not in _ALLOWED_ATTEMPT_STATES:
+    if not isinstance(state, str) or state not in _ALLOWED_ATTEMPT_STATES:
         raise CaptureTimeBoundaryError("거래 시도 상태가 올바르지 않습니다.")
     if (
         type(first_frame) is not int
@@ -420,10 +495,9 @@ def _build_transaction_boundary(
     last_time = index.frame_relative_ms[last_frame - 1]
     analysis_end = index.frame_relative_ms[-1]
     observed_duration = last_time - first_time
-    if observed_duration != duration_ms:
-        raise CaptureTimeBoundaryError(
-            "거래 시도 지속시간과 상대 시간 프레임 근거가 일치하지 않습니다."
-        )
+    duration_evidence_complete = _validate_transaction_duration(
+        index, attempt, first_frame, last_frame, duration_ms, observed_duration
+    )
     end_window = analysis_end - last_time
     boundary_state, near_start, near_end = _boundary_state(
         index=index,
@@ -446,6 +520,7 @@ def _build_transaction_boundary(
         start_near_boundary=near_start,
         end_near_boundary=near_end,
         display_filter=_display_filter(first_frame, last_frame),
+        duration_evidence_complete=duration_evidence_complete,
     )
 
 
@@ -473,6 +548,8 @@ def build_capture_time_boundaries(
     boundaries = []
     for attempt in attempts:
         attempt_id = getattr(attempt, "attempt_id", None)
+        if not isinstance(attempt_id, str) or _ATTEMPT_PATTERN.fullmatch(attempt_id) is None:
+            raise CaptureTimeBoundaryError("거래 시도 ID가 올바르지 않습니다.")
         if attempt_id in seen:
             raise CaptureTimeBoundaryError("거래 시도 ID가 중복됐습니다.")
         seen.add(attempt_id)
@@ -500,6 +577,16 @@ def build_capture_time_boundaries(
             0,
             "파일 순서상 타임스탬프 역행이 있어 거래 경계 위치를 확정하지 않습니다.",
         )
+    duration_evidence_complete = all(item.duration_evidence_complete for item in boundaries)
+    if not duration_evidence_complete:
+        cautions.insert(
+            0,
+            "시간 역행 거래의 일부 근거가 생략되어 지속시간은 범위만 확인했습니다.",
+        )
+    if index.timestamp_regressions:
+        cautions.append(
+            "역행 구간의 거래 프레임 시각 차이는 음수일 수 있으며 실제 경과시간이 아닙니다."
+        )
     if not source_complete:
         cautions.insert(
             0,
@@ -511,7 +598,7 @@ def build_capture_time_boundaries(
         profile_version=index.profile_version,
         frames_observed=index.frames_observed,
         expected_frames=index.expected_frames,
-        complete=index.complete and source_complete,
+        complete=index.complete and source_complete and duration_evidence_complete,
         first_frame=index.first_frame,
         last_frame=index.last_frame,
         first_to_last_relative_ms=index.first_to_last_relative_ms,
