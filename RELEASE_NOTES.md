@@ -1,144 +1,212 @@
-# v0.12.0-alpha.1 — Replay Counter 비식별 관계 분석 프리뷰
+# v0.11.0-alpha.1 — EAPOL-Key M1~M4 메시지 순서 관찰 프리뷰
 
-이번 릴리스는 EAPOL-Key M1~M4 순서 관찰에 **Replay Counter 관계 분석**을 추가합니다. Counter 숫자는 GUI·JSON·로그에 기록하지 않고 메시지 사이의 같음·증가·감소·불일치 관계만 제공합니다.
+이번 릴리스는 기존 캡처 품질·Finding·비식별 거래·`DEVICE-N` 여정·미응답 해석에 **EAPOL-Key M1~M4 메시지 번호 순서 관찰**을 추가합니다.
 
 Python과 Wireshark를 별도로 설치할 필요가 없습니다. AI·LLM·외부 API·인터넷 조회·텔레메트리·자동 업데이트도 사용하지 않습니다.
 
 ## 사용 방법
 
-1. `WlanTroubleshooterKO-v0.12.0-alpha.1-win64-portable.zip`을 받습니다.
-2. 같은 이름의 `.sha256` 파일과 ZIP SHA-256을 비교합니다.
+1. `WlanTroubleshooterKO-v0.11.0-alpha.1-win64-portable.zip`을 받습니다.
+2. 같은 이름의 `.sha256` 파일과 ZIP의 SHA-256을 비교합니다.
 3. ZIP을 로컬 폴더에 완전히 압축 해제합니다.
-4. `WlanTroubleshooterKO.exe`를 실행하고 PCAP 또는 PCAPNG를 선택합니다.
+4. `WlanTroubleshooterKO.exe`를 실행합니다.
+5. PCAP 또는 PCAPNG를 선택합니다.
 
 관리자 권한과 인터넷 연결은 필요하지 않습니다.
 
 ## 새 기능
 
-- 전용 최소 TShark 프로파일에서만 `eapol.keydes.replay_counter` 사용
-- M1/M2 Counter 동일·불일치 관계
-- M3/M4 Counter 동일·불일치 관계
-- M1→M3 Counter 증가·동일·감소 관계
-- 반복 M1~M4의 같은 Counter·다른 Counter 관계
-- 필드 부재, Counter 누락과 근거 생략의 `unavailable`·`partial`
-- GUI `[11. EAPOL Replay Counter 관계]`
-- 기존 최상위 JSON `schema_version = 2`를 유지하는 `eapol_replay_relations`
+- EAPOL-Key M1·M2·M3·M4 번호 순서 관찰
+- 같은 메시지 번호의 반복 관찰
+- 같은 프레임의 802.11 Retry 비트 표시
+- 미관찰 메시지 번호 표시
+- 메시지 번호 역순 관찰
+- 진행 중 새 M1과 M4 이후 새 메시지의 관찰 창 분리
+- `EAPOL-HS-N` 로컬 관찰 번호
+- `DEVICE-N ↔ AP-N` 비식별 근거
+- 첫·마지막 프레임, 상대 지속시간과 Wireshark `frame.number` 필터
+- GUI `[10. EAPOL 4-Way Handshake 메시지 순서]`
+- 기존 최상위 JSON `schema_version = 2`를 유지하는 `eapol_handshakes` 추가 결과
 
-## 관계 상태
+## 관찰 상태
+
+| 상태 | 의미 |
+|---|---|
+| `sequence-observed` | M1→M2→M3→M4 첫 순서가 관찰되고 번호 반복이 없음 |
+| `message-repetition-observed` | M1→M2→M3→M4 첫 순서와 같은 번호 반복이 함께 관찰됨 |
+| `out-of-order` | 메시지 번호가 이전 번호보다 작아지는 역순이 관찰됨 |
+| `incomplete` | M1~M4 중 일부만 관찰됨 |
+
+예시:
 
 ```text
-expected-relations-observed
-relation-mismatch-observed
-multiple-values-observed
-partial
-insufficient-events
-unavailable
+EAPOL-HS-1 · DEVICE-1 ↔ AP-1
+관찰 메시지: M1 → M2 → M3 → M3 → M4
+첫 관찰 순서: M1 → M2 → M3 → M4
+반복 메시지 번호: M3
+Retry 비트 관찰 프레임: #8
+상태: message-repetition-observed
 ```
 
-일반적인 관계가 관찰돼도 동일 Handshake·실제 재전송·키 설치·암호학적 성공을 확정하지 않습니다. 불일치는 캡처 누락이나 여러 교환 혼재 가능성을 포함하므로 AP·단말·RF 장애와 근본 원인을 자동 확정하지 않습니다.
+## 단말·AP 연결 경계
 
-## 항상 false인 값
+EAPOL-Key 이벤트는 다음 조건에서만 관찰에 포함됩니다.
 
 ```text
-raw_replay_counters_serialized
-replay_counter_values_persisted
+Key 이벤트 프레임이 DEVICE-N의 공개 근거 프레임에 포함됨
+해당 프레임의 단말 후보가 정확히 1개
+해당 DEVICE-N의 AP-N 후보가 정확히 1개
+```
+
+다음은 관찰에 포함하지 않습니다.
+
+- 단말 후보 없음
+- 단말 후보 둘 이상
+- AP 가명 없음 또는 둘 이상
+- 단말 근거 프레임 일부 생략으로 확인할 수 없는 이벤트
+
+시간 근접성만으로 단말이나 AP를 연결하지 않습니다. 로밍이 포함되어 한 단말의 AP 가명이 둘 이상이면 현재 단계에서는 보수적으로 모호 처리합니다.
+
+## 메시지 반복과 Retry 비트
+
+같은 M3가 반복되고 두 번째 M3 프레임에 802.11 Retry 비트가 있어도 실제 같은 Handshake의 재전송이라고 확정하지 않습니다.
+
+현재는 Replay Counter를 사용하지 않으므로 다음 표현만 허용합니다.
+
+```text
+같은 메시지 번호 반복 관찰
+같은 프레임에서 Retry 비트 관찰
+```
+
+## 확정하지 않는 항목
+
+M1→M2→M3→M4가 모두 보여도 다음 값은 항상 `false`입니다.
+
+```text
+replay_counter_correlation_available
+raw_key_material_serialized
+raw_identifiers_serialized
 same_handshake_confirmed
-retransmission_confirmed
 key_installation_confirmed
 cryptographic_success_confirmed
 root_cause_confirmed
 ```
 
-## 전용 실행 경계
+따라서 이 결과는 다음을 의미하지 않습니다.
 
-Replay Counter 관계 분석은 기존 분석과 같은 캡처 형식·크기·SHA-256, 같은 TShark 버전과 매니페스트 SHA-256을 다시 확인합니다. 분석 단계 사이에 캡처나 내장 TShark가 바뀌면 결과를 만들지 않습니다.
+- 동일한 한 번의 4-Way Handshake 확정
+- 키 설치 성공 확정
+- MIC·Nonce 검증 성공 확정
+- 전체 무선 접속 성공 확정
+- AP·단말·ClearPass 중 근본 원인 확정
 
-Replay Counter 원문은 다음 경로에서 차단됩니다.
+## 개인정보·키 정보 보호
+
+Phase 4I 모델은 이미 비식별화된 다음 값만 사용합니다.
 
 ```text
-일반 프로토콜 인벤토리
-공개 이벤트 타임라인
-DEVICE-N/AP-N 가명화
-레거시 TShark 실행
-GUI·JSON·로그
+EAPOL-Key 이벤트 종류
+메시지 번호 1~4
+프레임 번호
+상대 시간
+DEVICE-N
+AP-N
+같은 프레임의 Retry 이벤트
 ```
 
-Nonce, MIC, Key Data와 Payload 필드는 추출하지 않습니다.
-
-## Portable 실제 통합검증
-
-런타임 생성 Radiotap/IEEE 802.11 PCAP에서 다음 원문 Counter를 사용했습니다.
+다음 값은 GUI·JSON·로그·릴리스 자산에 포함하지 않습니다.
 
 ```text
-M1/M2 = 18446744073709551000
-M3/반복 M3/M4 = 18446744073709551001
-```
-
-최종 EXE의 공개 결과는 다음 관계뿐입니다.
-
-```text
-M1/M2 = equal-observed
-M3/M4 = equal-observed
-M1→M3 = increased-observed
-반복 M3 = same-counter-observed
-state = expected-relations-observed
-```
-
-검증 조건:
-
-- 외부 Python·Wireshark를 사용할 수 없는 PATH
-- 기존 Finding·타임라인·거래·`DEVICE-N`·여정·미응답·EAPOL 순서 게이트 유지
-- 두 Counter 숫자와 원본 필드명 비노출
-- MAC·BSSID·Nonce·MIC·Key Data·절대 시간·캡처 경로 비노출
-- 모든 Handshake·재전송·키 설치·암호학적 성공·근본 원인 확정 값 `false`
-- 분석 전후 Portable 배포 폴더 무변경
-
-후보 빌드 검증값:
-
-```text
-ZIP: WlanTroubleshooterKO-v0.12.0-alpha.1-win64-portable.zip
-크기: 98,539,557 bytes
-SHA-256: 0273bbc000d3fc0b19ca4d4109c756fcf4c43d61945e09ba3f1ede09501ba3eb
-```
-
-병합 후 릴리스 워크플로가 `main` 커밋에서 다시 빌드하므로 게시 자산의 최종 크기와 SHA-256은 새로 확정됩니다.
-
-## 데이터 보호
-
-다음 값은 결과에 기록하지 않습니다.
-
-```text
-Replay Counter 원문 숫자
-Nonce·MIC·Key Data
 원본 MAC·BSSID·SSID
-IP 주소·포트
+Replay Counter 원문
+Nonce
+MIC
+Key Data
+암호화 키
 사용자명·EAP Identity
-암호화 키·자격 증명
+IP 주소·포트
 절대 epoch
 Raw Payload
 캡처 파일명·절대경로
 TShark stderr 원문
 ```
 
+## Portable 실제 통합검증
+
+릴리스 빌드는 런타임에 다음 Radiotap/IEEE 802.11 PCAP을 생성합니다.
+
+```text
+#1 Authentication Request
+#2 Authentication Response
+#3 Association Request
+#4 Association Response
+#5 EAPOL-Key M1
+#6 EAPOL-Key M2
+#7 EAPOL-Key M3
+#8 Retry 비트가 있는 EAPOL-Key M3
+#9 EAPOL-Key M4
+```
+
+최종 `WlanTroubleshooterKO.exe`를 다음 환경에서 실행합니다.
+
+```text
+PYTHONPATH 제거
+PYTHONHOME 제거
+PATH를 Windows 시스템 폴더로 제한
+외부 Python 사용 불가
+외부 Wireshark 사용 불가
+```
+
+필수 결과:
+
+```text
+field_available = true
+source_key_events_total = 5
+linked_key_events = 5
+unassigned_key_events = 0
+ambiguous_key_events = 0
+observations_total = 1
+DEVICE-1 ↔ AP-1
+state = message-repetition-observed
+observed_message_numbers = [1,2,3,3,4]
+first_observed_order = [1,2,3,4]
+repeated_message_numbers = [3]
+retry_flag_frames = [8]
+```
+
+동시에 다음을 검사합니다.
+
+- 합성 MAC·BSSID 비노출
+- Nonce·MIC·Key Data 비노출
+- Replay Counter 원문 비노출
+- 절대 시각·파일명·경로 비노출
+- 모든 Handshake·키 설치·암호학적 성공·근본 원인 확정 플래그 `false`
+- 분석 전후 Portable 배포 폴더 무변경
+
+기존 Finding, 이벤트 타임라인, 거래 시도, 단말·AP 가명, 단말 여정과 캡처 관찰 가능성 실제 패킷 게이트도 함께 통과해야 릴리스됩니다.
+
 ## 호환성
 
-필드 프로파일은 `0.6.0`으로 올라갔으며 최상위 분석 JSON 스키마는 계속 `2`입니다. 기존 인벤토리·Finding·타임라인·거래·단말 가명·여정·미응답·EAPOL 순서 결과를 유지합니다.
+기존 분석 JSON의 최상위 `schema_version = 2`를 유지합니다. `eapol_handshakes`는 기존 결과를 변경하지 않는 추가 항목입니다.
 
 ## 아직 지원하지 않는 기능
 
-- Counter 관계만으로 동일 Handshake 또는 실제 재전송 확정
-- 키 설치·암호학적 성공 확정
-- PCAPNG Interface Statistics Block 기반 드롭 통계
-- 로밍·RSSI·채널·데이터율 기반 RF 분석
-- Aruba·ClearPass 맞춤 점검 안내
-- 단일 오프라인 한국어 HTML 보고서
+- Replay Counter 관계를 이용한 동일 교환 상관분석
+- 로밍 단말의 프레임별 비식별 `DEVICE-N ↔ AP-N` 연결
+- PCAPNG Interface Statistics Block·실제 드롭 카운터 활용
+- 응답 미관찰을 실제 미응답으로 확정
+- Radiotap RSSI·채널·데이터율 기반 RF 분석
+- Aruba Controller·ClearPass Role·VLAN 맞춤 점검 안내
+- 최종 단일 오프라인 한국어 HTML 보고서
 - 실제 사내 Aruba·ClearPass 캡처 검증
-- 상용 코드 서명
+- 애플리케이션 EXE 상용 코드 서명
 
 ## 릴리스 자산
 
-- `WlanTroubleshooterKO-v0.12.0-alpha.1-win64-portable.zip`
-- `WlanTroubleshooterKO-v0.12.0-alpha.1-win64-portable.zip.sha256`
+- `WlanTroubleshooterKO-v0.11.0-alpha.1-win64-portable.zip`
+- `WlanTroubleshooterKO-v0.11.0-alpha.1-win64-portable.zip.sha256`
 - `wireshark-4.6.8.tar.xz`
 - `wireshark-4.6.8.tar.xz.sha256`
 - `supply-chain-observed.json`
+
+Wireshark 소스 아카이브는 동봉 TShark 4.6.8 바이너리의 대응 소스입니다.
