@@ -26,7 +26,7 @@ Push-Location $RepositoryRoot
 try {
     $env:PYTHONPATH = (Join-Path $RepositoryRoot "src")
     Invoke-CheckedPython -Arguments @("-m", "compileall", "-q", "src", "tests", "scripts")
-    Invoke-CheckedPython -Arguments @("scripts/audit_source.py", ".")
+    Invoke-CheckedPython -Arguments @("scripts/audit_source.py", "--root", ".")
     Invoke-CheckedPython -Arguments @("scripts/audit_repository.py", ".")
     Invoke-CheckedPython -Arguments @(
         "-m",
