@@ -1,4 +1,4 @@
-"""캡처 사전 점검부터 PCAPNG 통계와 EAPOL 관계까지 조정한다."""
+"""캡처 사전 점검부터 상대 시간·PCAPNG 통계·EAPOL 관계까지 조정한다."""
 
 from __future__ import annotations
 
@@ -11,6 +11,10 @@ from wlan_troubleshooter_ko.analysis.capture_observability import (
     CaptureObservabilityError,
     CaptureObservabilityReport,
     build_capture_observability,
+)
+from wlan_troubleshooter_ko.analysis.capture_time_boundaries import (
+    CaptureTimeBoundaryError,
+    CaptureTimeBoundaryReport,
 )
 from wlan_troubleshooter_ko.analysis.device_journeys import DeviceJourneyError
 from wlan_troubleshooter_ko.analysis.device_sessions import DeviceSessionError
@@ -65,6 +69,9 @@ from wlan_troubleshooter_ko.tshark.replay_analysis import (
 )
 from wlan_troubleshooter_ko.tshark.runner import TSharkExecutionError
 from wlan_troubleshooter_ko.tshark.status import inspect_bundle
+from wlan_troubleshooter_ko.tshark.time_analysis import (
+    run_capture_time_boundary_analysis,
+)
 
 
 PathLike = Union[str, Path]
@@ -76,7 +83,7 @@ class CaptureAnalysisError(ValueError):
 
 @dataclass(frozen=True)
 class CaptureAnalysisResult:
-    """경로·원본 식별자·키 원문을 포함하지 않는 전체 분석 결과."""
+    """경로·절대 시각·원본 식별자·키 원문 없는 전체 분석 결과."""
 
     capture_format: str
     size_bytes: int
@@ -90,6 +97,7 @@ class CaptureAnalysisResult:
     eapol_handshakes: Optional[EapolHandshakeReport] = None
     eapol_replay_relations: Optional[EapolReplayRelationReport] = None
     pcapng_interface_statistics: Optional[PcapngInterfaceStatisticsReport] = None
+    capture_time_boundaries: Optional[CaptureTimeBoundaryReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -105,6 +113,11 @@ class CaptureAnalysisResult:
                 None
                 if self.pcapng_interface_statistics is None
                 else self.pcapng_interface_statistics.to_dict()
+            ),
+            "capture_time_boundaries": (
+                None
+                if self.capture_time_boundaries is None
+                else self.capture_time_boundaries.to_dict()
             ),
             "protocol_inventory_state": self.inventory_state,
             "protocol_inventory_message": self.inventory_message,
@@ -143,6 +156,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             DeviceSessionError,
             DeviceJourneyError,
             CaptureObservabilityError,
+            CaptureTimeBoundaryError,
             EapolHandshakeError,
             EapolReplayRelationError,
         ),
@@ -165,7 +179,7 @@ def _safe_inventory_failure(exc: Exception) -> str:
             "배포 ZIP을 다시 압축 해제해 주세요."
         )
     return (
-        "접속 단계·이벤트·거래·단말 여정·캡처 관찰 가능성·"
+        "접속 단계·이벤트·거래·단말 여정·캡처 상대 시간·관찰 가능성·"
         "EAPOL 메시지 및 Replay Counter 관계를 안전하게 완료하지 못했습니다."
     )
 
@@ -191,6 +205,7 @@ def _without_inventory(
         eapol_handshakes=None,
         eapol_replay_relations=None,
         pcapng_interface_statistics=statistics,
+        capture_time_boundaries=None,
     )
 
 
@@ -239,7 +254,7 @@ def analyze_capture(
             capabilities,
             statistics,
             "unavailable",
-            "내장 TShark가 포함되지 않은 소스 실행 모드라 접속 단계 분석을 실행하지 않았습니다.",
+            "내장 TShark가 포함되지 않은 소스 실행 모드라 접속 단계와 상대 시간 분석을 실행하지 않았습니다.",
         )
     if bundle_status.code != "integrity_verified":
         return _without_inventory(
@@ -301,6 +316,19 @@ def analyze_capture(
                 inventory_run.event_timeline,
                 inventory_run.transaction_sessions,
             )
+            time_boundaries = run_capture_time_boundary_analysis(
+                vendor_root,
+                capture.path,
+                workspace.root,
+                profile_path,
+                inventory_run.transaction_sessions,
+                expected_capture=capture,
+                expected_bundle_version=inventory_run.bundle_version,
+                expected_manifest_sha256=inventory_run.manifest_sha256,
+                expected_frames=expected_frames,
+                timeout_seconds=timeout_seconds,
+                cancel_event=cancel_event,
+            )
             eapol_handshakes = build_eapol_handshakes(
                 inventory_run.event_timeline,
                 inventory_run.device_sessions,
@@ -337,12 +365,13 @@ def analyze_capture(
         inventory_message=(
             "로컬 PCAPNG 인터페이스 통계와 내장 TShark 프로토콜 인벤토리, "
             "접속 단계 Finding, 비식별 이벤트·거래, 단말 가명·여정, "
-            "캡처 관찰 가능성, EAPOL-Key 메시지 순서와 Replay Counter 관계 "
-            "분석을 완료했습니다."
+            "캡처 상대 시간·관찰 가능성, EAPOL-Key 메시지 순서와 Replay "
+            "Counter 관계 분석을 완료했습니다."
         ),
         protocol_inventory=inventory_run,
         capture_observability=observability,
         eapol_handshakes=eapol_handshakes,
         eapol_replay_relations=replay_relations,
         pcapng_interface_statistics=statistics,
+        capture_time_boundaries=time_boundaries,
     )
