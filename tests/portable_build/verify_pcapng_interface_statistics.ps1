@@ -7,25 +7,68 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Restore-EnvironmentValue {
-    param([Parameter(Mandatory = $true)][string]$Name,[AllowNull()][string]$Value)
-    if ($null -eq $Value) { Remove-Item ("Env:" + $Name) -ErrorAction SilentlyContinue }
-    else { [Environment]::SetEnvironmentVariable($Name, $Value, "Process") }
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()][string]$Value
+    )
+    if ($null -eq $Value) {
+        Remove-Item ("Env:" + $Name) -ErrorAction SilentlyContinue
+    }
+    else {
+        [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
+    }
 }
 
 function Assert-NoForbiddenText {
-    param([Parameter(Mandatory = $true)][string]$Raw,[Parameter(Mandatory = $true)][string[]]$Forbidden)
+    param(
+        [Parameter(Mandatory = $true)][string]$Raw,
+        [Parameter(Mandatory = $true)][string[]]$Forbidden
+    )
     foreach ($Value in $Forbidden) {
         if ($Raw.Contains($Value, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "PCAPNG statistics result exposed an interface identity or absolute timestamp."
+            throw "PCAPNG statistics result exposed an interface identity, absolute timestamp, address, or path."
         }
     }
 }
 
+function Get-Counter {
+    param(
+        [Parameter(Mandatory = $true)]$Interface,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    $Value = @($Interface.counters | Where-Object { $_.name -eq $Name }) | Select-Object -First 1
+    if ($null -eq $Value) {
+        throw "PCAPNG statistics counter is missing: $Name"
+    }
+    return $Value
+}
+
+function Assert-SingleCounter {
+    param(
+        [Parameter(Mandatory = $true)]$Interface,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][long]$Expected
+    )
+    $Value = Get-Counter -Interface $Interface -Name $Name
+    if (
+        $Value.observations -ne 1 -or
+        [long]$Value.first_value -ne $Expected -or
+        [long]$Value.last_value -ne $Expected -or
+        $Value.progression -ne "single-value-observed"
+    ) {
+        throw "PCAPNG statistics counter is unexpected: $Name"
+    }
+}
+
 $PackageOutputPath = [System.IO.Path]::GetFullPath($PackageOutputPath)
-if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) { throw "Portable package metadata is missing." }
+if (-not (Test-Path -LiteralPath $PackageOutputPath -PathType Leaf)) {
+    throw "Portable package metadata is missing."
+}
 $Package = Get-Content -LiteralPath $PackageOutputPath -Raw | ConvertFrom-Json -Depth 32
 $Archive = [System.IO.Path]::GetFullPath([string]$Package.archive)
-if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw "Portable archive is missing." }
+if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
+    throw "Portable archive is missing."
+}
 
 $WorkRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("wlan-pcapng-statistics-test-" + [guid]::NewGuid().ToString("N"))
 $Expanded = Join-Path $WorkRoot "portable"
@@ -38,6 +81,8 @@ try {
     if (
         $BuildInfo.pcapng_interface_statistics_runtime -ne "enabled" -or
         $BuildInfo.absolute_timestamp_serialization -ne "disabled" -or
+        $BuildInfo.pcapng_string_option_serialization -ne "disabled" -or
+        $BuildInfo.interface_name_serialization -ne "disabled" -or
         $BuildInfo.raw_identifier_serialization -ne "disabled"
     ) {
         throw "Portable BUILD_INFO does not preserve the PCAPNG statistics privacy boundary."
@@ -75,43 +120,61 @@ try {
         Restore-EnvironmentValue -Name "PYTHONHOME" -Value $OldPythonHome
     }
 
-    if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) { throw "Portable PCAPNG statistics result is missing." }
+    if (-not (Test-Path -LiteralPath $Output -PathType Leaf)) {
+        throw "Portable PCAPNG statistics result is missing."
+    }
     $Raw = Get-Content -LiteralPath $Output -Raw
     $Result = $Raw | ConvertFrom-Json -Depth 192
-    $Structure = $Result.structure
+    $Report = $Result.pcapng_interface_statistics
     if (
         $Result.schema_version -ne 2 -or
         $Result.protocol_inventory_state -ne "completed" -or
-        $Structure.capture_format -ne "pcapng" -or
-        $Structure.records_scanned -ne 5 -or
-        $Structure.packets_scanned -ne 2 -or
-        $Structure.interface_statistics_state -ne "observed" -or
-        @($Structure.interface_statistics).Count -ne 1
+        $Result.structure.capture_format -ne "pcapng" -or
+        $Result.structure.records_scanned -ne 5 -or
+        $Result.structure.packets_scanned -ne 2 -or
+        $null -eq $Report -or
+        $Report.schema_version -ne 1 -or
+        $Report.supported_capture_format -ne $true -or
+        $Report.complete -ne $true -or
+        $Report.state -ne "reported-drop-observed" -or
+        $Report.sections_observed -ne 1 -or
+        $Report.interfaces_defined -ne 1 -or
+        $Report.statistics_blocks_observed -ne 1 -or
+        $Report.interfaces_with_statistics -ne 1 -or
+        $Report.raw_interface_identifiers_serialized -ne $false -or
+        $Report.absolute_timestamps_serialized -ne $false -or
+        $Report.capture_loss_excluded -ne $false -or
+        $Report.specific_packet_loss_confirmed -ne $false -or
+        $Report.root_cause_confirmed -ne $false
     ) {
-        throw "Portable PCAPNG structure did not expose one statistics observation."
+        throw "Portable PCAPNG statistics report is missing or violated its conservative boundary."
     }
 
-    $Statistics = @($Structure.interface_statistics)[0]
-    if (
-        $Statistics.interface_alias -ne "IFACE-1" -or
-        $Statistics.section_index -ne 0 -or
-        $Statistics.interface_id -ne 0 -or
-        $Statistics.observation_index -ne 1 -or
-        $Statistics.counter_state -ne "reported-drop-observed" -or
-        $Statistics.ifrecv -ne 2 -or
-        $Statistics.ifdrop -ne 3 -or
-        $Statistics.filteraccept -ne 2 -or
-        $Statistics.osdrop -ne 1 -or
-        $Statistics.usrdeliv -ne 2 -or
-        $Statistics.block_timestamp_present -ne $true -or
-        $Statistics.start_time_present -ne $true -or
-        $Statistics.end_time_present -ne $true -or
-        $Statistics.absolute_timestamps_serialized -ne $false -or
-        $Statistics.capture_loss_excluded -ne $false -or
-        $Statistics.root_cause_confirmed -ne $false
-    ) {
-        throw "Portable IFACE-1 statistics values or conservative flags are unexpected."
+    $Interfaces = @($Report.interfaces)
+    if ($Interfaces.Count -ne 1) {
+        throw "Portable PCAPNG statistics report must contain one anonymous interface."
     }
+    $Interface = $Interfaces[0]
+    if (
+        $Interface.interface_alias -ne "IFACE-1" -or
+        $Interface.section_index -ne 0 -or
+        $Interface.interface_id -ne 0 -or
+        $Interface.statistics_blocks -ne 1 -or
+        $Interface.state -ne "reported-drop-observed" -or
+        $Interface.raw_interface_identifiers_serialized -ne $false -or
+        $Interface.absolute_timestamps_serialized -ne $false -or
+        $Interface.specific_packet_loss_confirmed -ne $false -or
+        $Interface.root_cause_confirmed -ne $false
+    ) {
+        throw "Portable IFACE-1 statistics summary is unexpected."
+    }
+
+    Assert-SingleCounter -Interface $Interface -Name "ifrecv" -Expected 2
+    Assert-SingleCounter -Interface $Interface -Name "ifdrop" -Expected 3
+    Assert-SingleCounter -Interface $Interface -Name "filteraccept" -Expected 2
+    Assert-SingleCounter -Interface $Interface -Name "osdrop" -Expected 1
+    Assert-SingleCounter -Interface $Interface -Name "usrdeliv" -Expected 2
+
     if ($Result.capture_observability.capture_loss_excluded -ne $false) {
         throw "A reported PCAPNG counter must not prove capture-loss exclusion."
     }
@@ -128,7 +191,8 @@ try {
         "1112131415161718",
         "2122232425262728",
         "192.0.2.1",
-        "02:00:00:00:00:01"
+        "02:00:00:00:00:01",
+        "020000000001"
     )
 
     $AfterFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
