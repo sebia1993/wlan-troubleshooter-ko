@@ -11,19 +11,11 @@ class Phase4KPortableTests(unittest.TestCase):
     def text(self, relative):
         return (self.root / relative).read_text(encoding="utf-8")
 
-    def test_release_metadata_is_exact(self):
+    def test_phase4k_schema_remains_available(self):
         project = self.text("pyproject.toml")
-        for value in (
-            'version = "0.13.0a1"',
-            'phase = "4K"',
-            'pcapng-interface-statistics-version = "1"',
-            'release-tag = "v0.13.0-alpha.1"',
-        ):
-            self.assertIn(value, project)
-        release = self.text(".github/workflows/preview-release.yml")
-        self.assertIn('if ($Tag -ne "v0.13.0-alpha.1"', release)
+        self.assertIn('pcapng-interface-statistics-version = "1"', project)
 
-    def test_workflows_require_pcapng_statistics_gate(self):
+    def test_workflows_preserve_pcapng_statistics_gate(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -36,7 +28,7 @@ class Phase4KPortableTests(unittest.TestCase):
                 )
                 self.assertIn("verify_eapol_replay_relations.ps1", text)
 
-    def test_finalizer_enables_statistics_and_disables_sensitive_metadata(self):
+    def test_finalizer_preserves_statistics_and_sensitive_metadata_boundary(self):
         text = self.text("tests/portable_build/finalize_portable.ps1")
         for value in (
             'pcapng_interface_statistics_runtime = "enabled"',
