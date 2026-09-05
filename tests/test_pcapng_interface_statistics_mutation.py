@@ -11,7 +11,11 @@ from wlan_troubleshooter_ko.analysis.pcapng_interface_statistics import (
 from wlan_troubleshooter_ko.analysis.pcapng_statistics_service import (
     inspect_pcapng_interface_statistics,
 )
-from wlan_troubleshooter_ko.core.capture import CaptureInfo, validate_capture
+from wlan_troubleshooter_ko.core.capture import (
+    CaptureInfo,
+    CaptureValidationError,
+    validate_capture,
+)
 
 
 def block(block_type: int, body: bytes) -> bytes:
@@ -86,9 +90,11 @@ class PcapngInterfaceStatisticsMutationTests(unittest.TestCase):
 
             with mock.patch(
                 "wlan_troubleshooter_ko.analysis.pcapng_statistics_service.validate_capture",
-                side_effect=ValueError("C:/private/customer/capture.pcapng"),
+                side_effect=CaptureValidationError(
+                    "C:/private/customer/capture.pcapng"
+                ),
             ):
-                with self.assertRaises(ValueError) as captured:
+                with self.assertRaises(PcapngInterfaceStatisticsError) as captured:
                     inspect_pcapng_interface_statistics(expected)
 
         self.assertNotIn("customer", str(captured.exception))
