@@ -1,4 +1,4 @@
-"""캡처 사전 점검부터 EAPOL Replay Counter 관계까지 조정한다."""
+"""캡처 사전 점검부터 PCAPNG 통계와 EAPOL 관계까지 조정한다."""
 
 from __future__ import annotations
 
@@ -29,6 +29,11 @@ from wlan_troubleshooter_ko.analysis.models import (
     CaptureCapabilityReport,
     CaptureStructure,
     CaptureStructureError,
+)
+from wlan_troubleshooter_ko.analysis.pcapng_interface_statistics import (
+    PcapngInterfaceStatisticsError,
+    PcapngInterfaceStatisticsReport,
+    inspect_pcapng_interface_statistics,
 )
 from wlan_troubleshooter_ko.analysis.preflight import (
     classify_capture_capabilities,
@@ -82,6 +87,7 @@ class CaptureAnalysisResult:
     capture_observability: Optional[CaptureObservabilityReport] = None
     eapol_handshakes: Optional[EapolHandshakeReport] = None
     eapol_replay_relations: Optional[EapolReplayRelationReport] = None
+    pcapng_interface_statistics: Optional[PcapngInterfaceStatisticsReport] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -93,6 +99,11 @@ class CaptureAnalysisResult:
             },
             "structure": self.structure.to_dict(),
             "capabilities": self.capabilities.to_dict(),
+            "pcapng_interface_statistics": (
+                None
+                if self.pcapng_interface_statistics is None
+                else self.pcapng_interface_statistics.to_dict()
+            ),
             "protocol_inventory_state": self.inventory_state,
             "protocol_inventory_message": self.inventory_message,
             "protocol_inventory": (
@@ -161,6 +172,7 @@ def _without_inventory(
     capture: CaptureInfo,
     structure: CaptureStructure,
     capabilities: CaptureCapabilityReport,
+    statistics: PcapngInterfaceStatisticsReport,
     state: str,
     message: str,
 ) -> CaptureAnalysisResult:
@@ -176,6 +188,7 @@ def _without_inventory(
         capture_observability=None,
         eapol_handshakes=None,
         eapol_replay_relations=None,
+        pcapng_interface_statistics=statistics,
     )
 
 
@@ -189,7 +202,7 @@ def analyze_capture(
     timeout_seconds: int = 180,
     cancel_event: Optional[threading.Event] = None,
 ) -> CaptureAnalysisResult:
-    """내장 TShark로 공개 분석과 비식별 Counter 관계를 생성한다."""
+    """로컬 PCAPNG 통계와 내장 TShark 공개 분석을 생성한다."""
 
     try:
         capture: CaptureInfo = validate_capture(
@@ -201,7 +214,15 @@ def analyze_capture(
             cancel_event=cancel_event,
         )
         capabilities = classify_capture_capabilities(structure)
-    except (CaptureValidationError, CaptureStructureError) as exc:
+        statistics = inspect_pcapng_interface_statistics(
+            capture,
+            cancel_event=cancel_event,
+        )
+    except (
+        CaptureValidationError,
+        CaptureStructureError,
+        PcapngInterfaceStatisticsError,
+    ) as exc:
         raise CaptureAnalysisError(str(exc)) from exc
     except Exception:
         raise CaptureAnalysisError(
@@ -214,6 +235,7 @@ def analyze_capture(
             capture,
             structure,
             capabilities,
+            statistics,
             "unavailable",
             "내장 TShark가 포함되지 않은 소스 실행 모드라 접속 단계 분석을 실행하지 않았습니다.",
         )
@@ -222,6 +244,7 @@ def analyze_capture(
             capture,
             structure,
             capabilities,
+            statistics,
             "failed",
             "내장 TShark 파일이 누락되었거나 변경되었습니다. 배포 ZIP을 다시 압축 해제해 주세요.",
         )
@@ -241,6 +264,7 @@ def analyze_capture(
             capture,
             structure,
             capabilities,
+            statistics,
             "failed",
             str(exc),
         )
@@ -296,6 +320,7 @@ def analyze_capture(
             capture,
             structure,
             capabilities,
+            statistics,
             "failed",
             _safe_inventory_failure(exc),
         )
@@ -308,12 +333,14 @@ def analyze_capture(
         capabilities=capabilities,
         inventory_state="completed",
         inventory_message=(
-            "내장 TShark로 프로토콜 인벤토리, 접속 단계 Finding, "
-            "비식별 이벤트·거래, 단말 가명·여정, 캡처 관찰 가능성, "
-            "EAPOL-Key 메시지 순서와 Replay Counter 관계 분석을 완료했습니다."
+            "로컬 PCAPNG 인터페이스 통계와 내장 TShark 프로토콜 인벤토리, "
+            "접속 단계 Finding, 비식별 이벤트·거래, 단말 가명·여정, "
+            "캡처 관찰 가능성, EAPOL-Key 메시지 순서와 Replay Counter 관계 "
+            "분석을 완료했습니다."
         ),
         protocol_inventory=inventory_run,
         capture_observability=observability,
         eapol_handshakes=eapol_handshakes,
         eapol_replay_relations=replay_relations,
+        pcapng_interface_statistics=statistics,
     )
