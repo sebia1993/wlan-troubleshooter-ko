@@ -43,18 +43,19 @@ function Get-Counter {
     return $Value
 }
 
-function Assert-SingleCounter {
+function Assert-CounterProgression {
     param(
         [Parameter(Mandatory = $true)]$Interface,
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][long]$Expected
+        [Parameter(Mandatory = $true)][long]$First,
+        [Parameter(Mandatory = $true)][long]$Last
     )
     $Value = Get-Counter -Interface $Interface -Name $Name
     if (
-        $Value.observations -ne 1 -or
-        [long]$Value.first_value -ne $Expected -or
-        [long]$Value.last_value -ne $Expected -or
-        $Value.progression -ne "single-value-observed"
+        $Value.observations -ne 2 -or
+        [long]$Value.first_value -ne $First -or
+        [long]$Value.last_value -ne $Last -or
+        $Value.progression -ne "counter-increase-observed"
     ) {
         throw "PCAPNG statistics counter is unexpected: $Name"
     }
@@ -130,7 +131,7 @@ try {
         $Result.schema_version -ne 2 -or
         $Result.protocol_inventory_state -ne "completed" -or
         $Result.structure.capture_format -ne "pcapng" -or
-        $Result.structure.records_scanned -ne 5 -or
+        $Result.structure.records_scanned -ne 6 -or
         $Result.structure.packets_scanned -ne 2 -or
         $null -eq $Report -or
         $Report.schema_version -ne 1 -or
@@ -139,7 +140,7 @@ try {
         $Report.state -ne "reported-drop-observed" -or
         $Report.sections_observed -ne 1 -or
         $Report.interfaces_defined -ne 1 -or
-        $Report.statistics_blocks_observed -ne 1 -or
+        $Report.statistics_blocks_observed -ne 2 -or
         $Report.interfaces_with_statistics -ne 1 -or
         $Report.raw_interface_identifiers_serialized -ne $false -or
         $Report.absolute_timestamps_serialized -ne $false -or
@@ -159,7 +160,7 @@ try {
         $Interface.interface_alias -ne "IFACE-1" -or
         $Interface.section_index -ne 0 -or
         $Interface.interface_id -ne 0 -or
-        $Interface.statistics_blocks -ne 1 -or
+        $Interface.statistics_blocks -ne 2 -or
         $Interface.state -ne "reported-drop-observed" -or
         $Interface.raw_interface_identifiers_serialized -ne $false -or
         $Interface.absolute_timestamps_serialized -ne $false -or
@@ -169,11 +170,11 @@ try {
         throw "Portable IFACE-1 statistics summary is unexpected."
     }
 
-    Assert-SingleCounter -Interface $Interface -Name "ifrecv" -Expected 2
-    Assert-SingleCounter -Interface $Interface -Name "ifdrop" -Expected 3
-    Assert-SingleCounter -Interface $Interface -Name "filteraccept" -Expected 2
-    Assert-SingleCounter -Interface $Interface -Name "osdrop" -Expected 1
-    Assert-SingleCounter -Interface $Interface -Name "usrdeliv" -Expected 2
+    Assert-CounterProgression -Interface $Interface -Name "ifrecv" -First 2 -Last 4
+    Assert-CounterProgression -Interface $Interface -Name "ifdrop" -First 0 -Last 3
+    Assert-CounterProgression -Interface $Interface -Name "filteraccept" -First 2 -Last 4
+    Assert-CounterProgression -Interface $Interface -Name "osdrop" -First 0 -Last 1
+    Assert-CounterProgression -Interface $Interface -Name "usrdeliv" -First 2 -Last 4
 
     if ($Result.capture_observability.capture_loss_excluded -ne $false) {
         throw "A reported PCAPNG counter must not prove capture-loss exclusion."
@@ -182,17 +183,22 @@ try {
     Assert-NoForbiddenText -Raw $Raw -Forbidden @(
         $Capture,
         (Split-Path -Leaf $Capture),
-        "Corp-WLAN-Private-Adapter",
-        "Internal monitor path",
-        "72623859790382856",
-        "1230066625199609624",
-        "2387509390608836392",
-        "0102030405060708",
-        "1112131415161718",
-        "2122232425262728",
-        "192.0.2.1",
-        "02:00:00:00:00:01",
-        "020000000001"
+        "private-section-comment-phase4k",
+        "private-hardware-phase4k",
+        "private-operating-system-phase4k",
+        "private-capture-application-phase4k",
+        "private-interface-name-phase4k",
+        "private-interface-description-phase4k",
+        "private-packet-comment-phase4k",
+        "private-statistics-comment-phase4k",
+        "1700004000000000",
+        "1700004005000000",
+        "02:00:00:00:00:e1",
+        "02:00:00:00:00:e2",
+        "0200000000e1",
+        "0200000000e2",
+        "192.0.2.81",
+        "192.0.2.1"
     )
 
     $AfterFiles = @(Get-ChildItem -LiteralPath $Expanded -Recurse -File | ForEach-Object {
