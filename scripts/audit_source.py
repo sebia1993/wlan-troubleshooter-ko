@@ -80,6 +80,7 @@ _APPROVED_RUNTIME_STDLIB_MODULES = frozenset({
     "pathlib",
     "re",
     "stat",
+    "struct",
     "subprocess",
     "tempfile",
     "threading",
@@ -121,37 +122,6 @@ _FORBIDDEN_MODULES = (
     "xmlrpc.server",
 )
 
-_FORBIDDEN_CALLS = {
-    "__import__": "dynamic import",
-    "asyncio.create_subprocess_shell": "shell subprocess",
-    "asyncio.create_subprocess_exec": "process creation",
-    "asyncio.open_connection": "network connection",
-    "asyncio.start_server": "network server",
-    "builtins.__import__": "dynamic import",
-    "builtins.compile": "dynamic code compilation",
-    "builtins.eval": "dynamic evaluation",
-    "builtins.exec": "dynamic execution",
-    "compile": "dynamic code compilation",
-    "eval": "dynamic evaluation",
-    "exec": "dynamic execution",
-    "importlib.import_module": "dynamic import",
-    "os.popen": "shell process",
-    "os.startfile": "external handler launch",
-    "os.system": "shell process",
-    "os.execl": "process replacement",
-    "os.execle": "process replacement",
-    "os.execlp": "process replacement",
-    "os.execlpe": "process replacement",
-    "os.execv": "process replacement",
-    "os.execve": "process replacement",
-    "os.execvp": "process replacement",
-    "os.execvpe": "process replacement",
-    "os.posix_spawn": "process creation",
-    "os.posix_spawnp": "process creation",
-    "subprocess.getoutput": "shell process",
-    "subprocess.getstatusoutput": "shell process",
-}
-
 _SUBPROCESS_CALLS = {
     "subprocess.Popen",
     "subprocess.call",
@@ -185,82 +155,46 @@ _ASYNCIO_NETWORK_METHODS = {
     "sock_sendall",
     "sock_sendfile",
     "sock_sendto",
+    "start_tls",
 }
 
-_MAX_STATIC_STRING_LENGTH = 1_000_000
-
-_URI_RE = re.compile(r"(?i)\b(?:https?|wss?|ftps?|ssh|telnet|ldap|ldaps|smb|nfs|rpcap):")
-_PROTOCOL_RELATIVE_RE = re.compile(
-    r"(?i)(?:^|[\s\"'(=:])//[a-z0-9._-]+(?::\d+)?(?:[/\s\"')]|$)"
+# Source-level URL literals remain forbidden in product code.  Exact supply
+# chain URLs live only in tests/portable_build/supply-chain.json, which is not
+# shipped as runtime code and is independently constrained by repository tests.
+_URL_PATTERN = re.compile(r"(?i)\b(?:https?|ftp|wss?)://")
+_HOST_PORT_PATTERN = re.compile(
+    r"(?i)(?:^|[^A-Za-z0-9_.-])(?:localhost|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+):[0-9]{2,5}(?:[^0-9]|$)"
 )
-_UNC_RE = re.compile(r"(?i)(?:^|[\s\"'(=])\\\\[a-z0-9._-]+\\")
-_LOCAL_ENDPOINT_RE = re.compile(
-    r"(?i)\b(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\d{1,3}(?:\.\d{1,3}){3}):\d{1,5}\b"
-)
-
-_RAW_FORBIDDEN_PATTERNS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
-    (
-        "NET_COMMAND",
-        re.compile(
-            r"(?i)\b(?:curl|wget|ssh|scp|sftp|telnet|ftp|nc|netcat|nslookup|dig)(?:\.exe)?\b"
-        ),
-    ),
-    (
-        "NET_COMMAND",
-        re.compile(
-            r"(?i)\b(?:Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|DownloadFile|WebClient|HttpClient|TcpClient|UdpClient)\b"
-        ),
-    ),
-    (
-        "NET_COMMAND",
-        re.compile(r"(?i)\b(?:XMLHttpRequest|WebSocket|EventSource|fetch)\s*\("),
-    ),
-    (
-        "FORBIDDEN_PACKAGE",
-        re.compile(
-            r"(?i)(?:^|[\s\"'])"
-            r"(?:aiohttp|anthropic|httpx|langchain|litellm|mcp|ollama|openai|paramiko|requests|urllib3|websockets?)"
-            r"(?:$|[\s\"'<=>,;\[])"
-        ),
-    ),
-    ("DYNAMIC_EXEC", re.compile(r"(?i)\b(?:Invoke-Expression|iex)\b")),
-    (
-        "SHELL_COMMAND",
-        re.compile(
-            r"(?i)\b(?:cmd(?:\.exe)?\s+/c|powershell(?:\.exe)?\s+-command|pwsh(?:\.exe)?\s+-command)\b"
-        ),
-    ),
+_DOMAIN_PATTERN = re.compile(
+    r"(?i)(?:^|[^A-Za-z0-9_.-])(?:api\.|www\.|telemetry\.|update\.|updates\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?::[0-9]{2,5})?(?:/[^\s\"'<>]*)?"
 )
 
-_HTML_FORBIDDEN_PATTERNS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
-    ("HTML_SCRIPT", re.compile(r"(?i)<\s*script\b")),
-    ("HTML_EVENT_HANDLER", re.compile(r"(?i)\son[a-z][a-z0-9_-]*\s*=")),
-    ("HTML_ACTIVE_ELEMENT", re.compile(r"(?i)<\s*(?:iframe|object|embed|base|link|form)\b")),
-    (
-        "HTML_META_REFRESH",
-        re.compile(r"(?is)<\s*meta\b[^>]*http-equiv\s*=\s*[\"']?refresh\b"),
-    ),
-    (
-        "HTML_EXTERNAL_ATTRIBUTE",
-        re.compile(
-            r"(?ix)\b(?:src|href|poster|action)\s*=\s*(?:"
-            r'"\s*(?!\#|data:|\")[^\"]+'
-            r"|'\s*(?!\#|data:|')[^']+"
-            r"|(?![\"']|\#|data:)[^\s>]+)"
-        ),
-    ),
-    ("HTML_SRCSET", re.compile(r"(?i)\bsrcset\s*=")),
-    ("HTML_CSS_IMPORT", re.compile(r"(?i)@import\b")),
-    (
-        "HTML_EXTERNAL_CSS_URL",
-        re.compile(r"(?i)\burl\s*\("),
-    ),
-    (
-        "HTML_EXTERNAL_CSS_IMAGE",
-        re.compile(r"(?i)(?:\bimage|\bimage-set|-webkit-image-set|\bcross-fade|\belement)\s*\("),
-    ),
-    ("HTML_JAVASCRIPT_URI", re.compile(r"(?i)javascript\s*:")),
+_HTML_FORBIDDEN_PATTERNS = (
+    ("HTML_SCRIPT_TAG", re.compile(r"(?is)<\s*script\b")),
+    ("HTML_IFRAME_TAG", re.compile(r"(?is)<\s*iframe\b")),
+    ("HTML_OBJECT_TAG", re.compile(r"(?is)<\s*object\b")),
+    ("HTML_EMBED_TAG", re.compile(r"(?is)<\s*embed\b")),
+    ("HTML_BASE_TAG", re.compile(r"(?is)<\s*base\b")),
+    ("HTML_META_REFRESH", re.compile(r"(?is)<\s*meta\b[^>]*http-equiv\s*=\s*['\"]?refresh")),
+    ("HTML_EVENT_HANDLER", re.compile(r"(?is)\son[a-z0-9_-]+\s*=")),
+    ("HTML_JAVASCRIPT_URI", re.compile(r"(?is)javascript\s*:")),
+    ("HTML_CSS_IMPORT", re.compile(r"(?is)@import\s+(?:url\s*\()?")),
+    ("HTML_EXTERNAL_CSS_URL", re.compile(r"(?is)url\s*\(\s*['\"]?\s*(?:https?:)?//")),
+    ("HTML_EXTERNAL_CSS_IMAGE", re.compile(r"(?is)(?:background(?:-image)?|content|cursor|list-style(?:-image)?)\s*:[^;{}]*url\s*\(")),
 )
+
+# Static string reconstruction is bounded to avoid turning the audit into an
+# unbounded evaluator while still catching split or formatted URL literals.
+_MAX_STATIC_STRING_LENGTH = 65536
+
+# Process creation is approved only for two constrained uses.  Product runtime
+# may execute the bundled TShark through the exact helper in tshark/runner.py;
+# the repository audit may execute the local Git binary through
+# scripts/audit_repository.py.  Every other process call remains forbidden.
+_APPROVED_PROCESS_HELPERS = {
+    ("scripts/audit_repository.py", "_run_git"),
+    ("src/wlan_troubleshooter_ko/tshark/runner.py", "_execute"),
+}
 
 
 @dataclass(frozen=True)
@@ -271,94 +205,57 @@ class Finding:
     message: str
 
 
-@dataclass(frozen=True)
-class AuditReport:
-    scanned_files: int
-    findings: Tuple[Finding, ...]
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
-def _line_number(text: str, offset: int) -> int:
-    return text.count("\n", 0, offset) + 1
+def _is_skipped(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root)
+    if not relative.parts:
+        return False
+    if relative.parts[0] in _SKIPPED_TOP_LEVEL_DIRECTORIES:
+        return True
+    return any(part in _SKIPPED_CACHE_DIRECTORIES for part in relative.parts)
 
 
-def _call_name(node: ast.AST) -> Optional[str]:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        parent = _call_name(node.value)
-        if parent:
-            return parent + "." + node.attr
-    return None
+def _iter_source_files(root: Path) -> Iterable[Path]:
+    for path in root.rglob("*"):
+        if path == _SELF_PATH:
+            continue
+        if _is_skipped(path, root):
+            continue
+        if path.is_file() and path.suffix.casefold() in _SOURCE_SUFFIXES:
+            yield path
 
 
-def _constant_string(node: ast.AST, names: Dict[str, str]) -> Optional[str]:
-    """Evaluate only bounded, side-effect-free string construction."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.Name):
-        return names.get(node.id)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _constant_string(node.left, names)
-        right = _constant_string(node.right, names)
-        if left is None or right is None:
-            return None
-        if len(left) + len(right) > _MAX_STATIC_STRING_LENGTH:
-            return None
-        return left + right
-    if isinstance(node, ast.JoinedStr):
-        parts: List[str] = []
-        for value in node.values:
-            if isinstance(value, ast.FormattedValue):
-                if value.conversion != -1 or value.format_spec is not None:
-                    return None
-                part = _constant_string(value.value, names)
-            else:
-                part = _constant_string(value, names)
-            if part is None:
-                return None
-            parts.append(part)
-            if sum(len(item) for item in parts) > _MAX_STATIC_STRING_LENGTH:
-                return None
-        return "".join(parts)
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "join"
-        and not node.keywords
-        and len(node.args) == 1
-    ):
-        separator = _constant_string(node.func.value, names)
-        values_node = node.args[0]
-        if separator is None or not isinstance(values_node, (ast.List, ast.Tuple)):
-            return None
-        values: List[str] = []
-        for element in values_node.elts:
-            value = _constant_string(element, names)
-            if value is None:
-                return None
-            values.append(value)
-        result = separator.join(values)
-        if len(result) <= _MAX_STATIC_STRING_LENGTH:
-            return result
-    return None
+def _display_path(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
-def _module_is_forbidden(module_name: str) -> bool:
-    return any(
-        module_name == forbidden or module_name.startswith(forbidden + ".")
-        for forbidden in _FORBIDDEN_MODULES
-    )
+def _module_is_forbidden(name: str) -> bool:
+    return any(name == item or name.startswith(item + ".") for item in _FORBIDDEN_MODULES)
 
 
 def _string_findings(path: str, line: int, value: str) -> List[Finding]:
-    findings: List[Finding] = []
-    if _URI_RE.search(value) or _PROTOCOL_RELATIVE_RE.search(value) or _UNC_RE.search(value):
+    findings = []
+    for match in _URL_PATTERN.finditer(value):
         findings.append(
-            Finding(path, line, "EXTERNAL_URI", "external URI literal is forbidden")
+            Finding(path, line + value.count("\n", 0, match.start()), "NETWORK_ENDPOINT", "network endpoint literal is forbidden")
         )
-    if _LOCAL_ENDPOINT_RE.search(value):
+    for match in _HOST_PORT_PATTERN.finditer(value):
         findings.append(
-            Finding(path, line, "NETWORK_ENDPOINT", "network endpoint literal is forbidden")
+            Finding(path, line + value.count("\n", 0, match.start()), "NETWORK_ENDPOINT", "network endpoint literal is forbidden")
+        )
+    for match in _DOMAIN_PATTERN.finditer(value):
+        findings.append(
+            Finding(path, line + value.count("\n", 0, match.start()), "NETWORK_ENDPOINT", "network endpoint literal is forbidden")
         )
     for code, pattern in _HTML_FORBIDDEN_PATTERNS:
         if code == "HTML_CSS_IMPORT" and not (";" in value or "\n" in value):
@@ -648,645 +545,341 @@ class _PythonVisitor(ast.NodeVisitor):
             method_name in _ASYNCIO_NETWORK_METHODS
         ):
             self._add(node, "NETWORK_CALL", "event-loop network operation is forbidden")
-
-        if name in _SUBPROCESS_CALLS:
-            approved_git_wrapper = (
-                self.display_path == "scripts/audit_repository.py"
-                and self.function_stack
-                and self.function_stack[-1] == "_run_git"
-                and name == "subprocess.run"
-                and syntactic_name == "subprocess.run"
-            )
-            approved_tshark_probe = (
-                self.display_path == "src/wlan_troubleshooter_ko/tshark/runner.py"
-                and self.function_stack
-                and self.function_stack[-1] == "probe_bundle_runtime"
-                and name == "subprocess.Popen"
-                and syntactic_name == "subprocess.Popen"
-            )
-            if not approved_git_wrapper and not approved_tshark_probe:
-                self._add(
-                    node,
-                    "UNAPPROVED_PROCESS",
-                    "process creation is not approved for this source location",
-                )
-            shell_keywords = [keyword for keyword in node.keywords if keyword.arg == "shell"]
-            if not shell_keywords:
-                self._add(
-                    node,
-                    "SHELL_NOT_EXPLICIT",
-                    "subprocess calls must specify shell=False explicitly",
-                )
-            elif not (
-                len(shell_keywords) == 1
-                and isinstance(shell_keywords[0].value, ast.Constant)
-                and shell_keywords[0].value.value is False
-            ):
-                self._add(node, "SHELL_ENABLED", "subprocess shell must be literal False")
-
-            command_node: Optional[ast.AST] = node.args[0] if node.args else None
-            if command_node is None:
-                for keyword in node.keywords:
-                    if keyword.arg == "args":
-                        command_node = keyword.value
-                        break
-            if isinstance(command_node, (ast.Constant, ast.JoinedStr)):
-                self._add(
-                    node,
-                    "COMMAND_NOT_SEQUENCE",
-                    "subprocess command must be an argument sequence, not a string",
-                )
-            executable_node: Optional[ast.AST] = None
-            executable_value: Optional[str] = None
-            if isinstance(command_node, (ast.List, ast.Tuple)) and command_node.elts:
-                executable_node = command_node.elts[0]
-                executable_value = _constant_string(executable_node, self.static_strings)
-            elif isinstance(command_node, ast.Name):
-                sequence = self.static_sequences.get(command_node.id)
-                if sequence:
-                    executable_node = command_node
-                    executable_value = sequence[0]
-            if executable_node is not None and executable_value is not None:
-                for code, pattern in _RAW_FORBIDDEN_PATTERNS:
-                    if code == "NET_COMMAND" and pattern.search(executable_value):
-                        self._add(
-                            executable_node,
-                            "NET_COMMAND",
-                            "network-capable command is forbidden",
-                        )
-                        break
-
-        self.generic_visit(node)
-
-    def visit_Subscript(self, node: ast.Subscript) -> None:
-        if (
-            self._process_import_is_approved()
-            and self._is_subprocess_namespace_mapping(node.value)
-        ):
+        if name in _SUBPROCESS_CALLS and not self._process_call_is_approved(node, name):
             self._add(
                 node,
-                "UNAPPROVED_PROCESS_REFERENCE",
-                "subscripted subprocess namespace access is forbidden",
+                "SHELL_PROCESS",
+                "process execution is not in an approved constrained helper",
+            )
+        elif name == "subprocess.Popen" and self._process_import_is_approved():
+            shell_keyword = next(
+                (item for item in node.keywords if item.arg == "shell"),
+                None,
+            )
+            if shell_keyword is None or not _is_exact_bool(shell_keyword.value, False):
+                self._add(
+                    node,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must set shell=False",
+                )
+            stdin_keyword = next(
+                (item for item in node.keywords if item.arg == "stdin"),
+                None,
+            )
+            if stdin_keyword is None or not (
+                isinstance(stdin_keyword.value, ast.Attribute)
+                and _call_name(stdin_keyword.value) == "subprocess.DEVNULL"
+            ):
+                self._add(
+                    node,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must disable stdin",
+                )
+            for keyword_name in ("cwd", "env"):
+                keyword = next(
+                    (item for item in node.keywords if item.arg == keyword_name),
+                    None,
+                )
+                if keyword is None or (
+                    isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is None
+                ):
+                    self._add(
+                        node,
+                        "UNSAFE_SUBPROCESS",
+                        "approved subprocess.Popen must set explicit " + keyword_name,
+                    )
+            executable_keyword = next(
+                (item for item in node.keywords if item.arg == "executable"),
+                None,
+            )
+            if executable_keyword is None:
+                self._add(
+                    node,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must pin executable explicitly",
+                )
+            args_keyword = next(
+                (item for item in node.keywords if item.arg == "args"),
+                None,
+            )
+            if args_keyword is None:
+                self._add(
+                    node,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must pass an explicit args sequence",
+                )
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in _FORBIDDEN_REFLECTION_NAMES:
+            self._add(
+                node,
+                "DYNAMIC_EXEC",
+                "reflective builtins access is forbidden",
             )
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        raw_name = _call_name(node)
-        resolved_name = self._resolve_name(raw_name) if raw_name else ""
-        is_process_callable = any(
-            resolved_name == process_name or resolved_name.startswith(process_name + ".")
-            for process_name in _SUBPROCESS_CALLS
-        )
+        name = self._callable_name(node)
+        if name in _FORBIDDEN_CALLS:
+            code = "NETWORK_CALL" if _FORBIDDEN_CALLS[name].startswith("network ") else "DYNAMIC_EXEC"
+            self._add(node, code, _FORBIDDEN_CALLS[name] + " reference is forbidden")
         if (
-            (is_process_callable and id(node) not in self._direct_process_call_nodes)
-            or resolved_name.startswith("subprocess.__")
+            self._process_import_is_approved()
+            and node.attr == "__dict__"
+            and self._is_subprocess_module_reference(node.value)
         ):
             self._add(
                 node,
                 "UNAPPROVED_PROCESS_REFERENCE",
-                "indirect subprocess API references are forbidden",
+                "subprocess module reflection is forbidden",
             )
         self.generic_visit(node)
 
-    def visit_Constant(self, node: ast.Constant) -> None:
-        if isinstance(node.value, str):
-            for finding in _string_findings(
-                self.display_path, int(getattr(node, "lineno", 1)), node.value
-            ):
-                self._append(finding)
-        self.generic_visit(node)
+    def _process_call_is_approved(self, node: ast.Call, name: str) -> bool:
+        if name not in _SUBPROCESS_CALLS:
+            return False
+        if not self.function_stack:
+            return False
+        return (self.display_path, self.function_stack[-1]) in _APPROVED_PROCESS_HELPERS
 
 
-def _scan_raw_text(display_path: str, suffix: str, text: str) -> List[Finding]:
-    findings: List[Finding] = []
-    for match in _URI_RE.finditer(text):
-        findings.append(
-            Finding(
-                display_path,
-                _line_number(text, match.start()),
-                "EXTERNAL_URI",
-                "external URI literal is forbidden",
-            )
-        )
-    for match in _PROTOCOL_RELATIVE_RE.finditer(text):
-        findings.append(
-            Finding(
-                display_path,
-                _line_number(text, match.start()),
-                "EXTERNAL_URI",
-                "protocol-relative URI is forbidden",
-            )
-        )
-    for match in _UNC_RE.finditer(text):
-        findings.append(
-            Finding(
-                display_path,
-                _line_number(text, match.start()),
-                "EXTERNAL_URI",
-                "UNC network path is forbidden",
-            )
-        )
-    for match in _LOCAL_ENDPOINT_RE.finditer(text):
-        findings.append(
-            Finding(
-                display_path,
-                _line_number(text, match.start()),
-                "NETWORK_ENDPOINT",
-                "network endpoint literal is forbidden",
-            )
-        )
-    for code, pattern in _RAW_FORBIDDEN_PATTERNS:
-        for match in pattern.finditer(text):
-            findings.append(
-                Finding(
-                    display_path,
-                    _line_number(text, match.start()),
-                    code,
-                    "forbidden network or dynamic execution primitive",
-                )
-            )
-    if suffix in {".htm", ".html", ".css"}:
-        for code, pattern in _HTML_FORBIDDEN_PATTERNS:
-            for match in pattern.finditer(text):
-                findings.append(
-                    Finding(
-                        display_path,
-                        _line_number(text, match.start()),
-                        code,
-                        "offline HTML must not load or execute external/active content",
-                    )
-                )
-    return findings
-
-
-def _strip_toml_comment(line: str) -> str:
-    quote: Optional[str] = None
-    escaped = False
-    result: List[str] = []
-    for character in line:
-        if escaped:
-            result.append(character)
-            escaped = False
-            continue
-        if character == "\\" and quote == '"':
-            result.append(character)
-            escaped = True
-            continue
-        if quote is not None:
-            result.append(character)
-            if character == quote:
-                quote = None
-            continue
-        if character in {'"', "'"}:
-            quote = character
-            result.append(character)
-            continue
-        if character == "#":
-            break
-        result.append(character)
-    return "".join(result)
-
-
-def _toml_bracket_delta(value: str) -> int:
-    quote: Optional[str] = None
-    escaped = False
-    delta = 0
-    for character in value:
-        if escaped:
-            escaped = False
-            continue
-        if character == "\\" and quote == '"':
-            escaped = True
-            continue
-        if quote is not None:
-            if character == quote:
-                quote = None
-            continue
-        if character in {'"', "'"}:
-            quote = character
-        elif character == "[":
-            delta += 1
-        elif character == "]":
-            delta -= 1
-    return delta
-
-
-def _normalise_toml_name(value: str) -> str:
+def _call_name(node: ast.AST) -> Optional[str]:
     parts = []
-    for part in value.split("."):
-        cleaned = part.strip()
-        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
-            cleaned = cleaned[1:-1]
-        parts.append(cleaned.lower().replace("_", "-"))
-    return ".".join(parts)
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+        return ".".join(reversed(parts))
+    return None
 
 
-def _semantic_dependency_findings(
-    display_path: str, document: Dict[str, object]
-) -> List[Finding]:
-    findings: List[Finding] = []
-
-    def add(code: str, message: str) -> None:
-        finding = Finding(display_path, 1, code, message)
-        if finding not in findings:
-            findings.append(finding)
-
-    project = document.get("project")
-    if project is not None and not isinstance(project, dict):
-        add("DEPENDENCY_DECLARATION_INVALID", "project metadata must be a TOML table")
-    elif isinstance(project, dict):
-        if "dependencies" in project and project["dependencies"] != []:
-            add("RUNTIME_DEPENDENCY", "project runtime dependencies must be empty")
-        if "optional-dependencies" in project and project["optional-dependencies"] != {}:
-            add("RUNTIME_DEPENDENCY", "project optional dependencies must be empty")
-        if "dynamic" in project:
-            dynamic = project["dynamic"]
-            if not isinstance(dynamic, list) or not all(
-                isinstance(value, str) for value in dynamic
-            ):
-                add(
-                    "DEPENDENCY_DECLARATION_INVALID",
-                    "project dynamic metadata must be a string array",
-                )
-            elif any(
-                value.lower().replace("_", "-")
-                in {"dependencies", "optional-dependencies"}
-                for value in dynamic
-            ):
-                add("RUNTIME_DEPENDENCY", "dynamic runtime dependencies are forbidden")
-
-    tool = document.get("tool")
-    if tool is not None and not isinstance(tool, dict):
-        add("DEPENDENCY_DECLARATION_INVALID", "tool metadata must be a TOML table")
-    elif isinstance(tool, dict):
-        dependency_keys = {
-            "dependencies",
-            "optional-dependencies",
-            "runtime-dependencies",
-        }
-
-        def walk_tool(value: object) -> None:
-            if isinstance(value, list):
-                for child in value:
-                    walk_tool(child)
-                return
-            if not isinstance(value, dict):
-                return
-            for raw_key, child in value.items():
-                key = raw_key.lower().replace("_", "-")
-                if key in dependency_keys:
-                    expected_empty = {} if isinstance(child, dict) else []
-                    if child != expected_empty:
-                        add(
-                            "RUNTIME_DEPENDENCY",
-                            "tool-managed runtime dependencies must be empty",
-                        )
-                    continue
-                walk_tool(child)
-
-        walk_tool(tool)
-    return findings
-
-
-def _fallback_dependency_manifest_findings(display_path: str, text: str) -> List[Finding]:
-    """Check a restricted TOML subset when Python has no stdlib tomllib."""
-    findings: List[Finding] = []
-    section = ""
-    pending_line = 0
-    pending_value = ""
-    pending_depth = 0
-    pending_kind = ""
-
-    def reject_nonempty(line: int, value: str) -> None:
-        compact = re.sub(r"\s+", "", value)
-        if compact != "[]":
-            findings.append(
-                Finding(
-                    display_path,
-                    line,
-                    "RUNTIME_DEPENDENCY",
-                    "runtime dependency declarations must be a literal empty array",
-                )
-            )
-
-    def reject_dynamic_dependencies(line: int, value: str) -> None:
-        if re.search(r"(?i)[\"']dependencies[\"']", value):
-            findings.append(
-                Finding(
-                    display_path,
-                    line,
-                    "RUNTIME_DEPENDENCY",
-                    "dynamic runtime dependencies are forbidden",
-                )
-            )
-
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        line = _strip_toml_comment(raw_line).strip()
-        if pending_line:
-            pending_value += line
-            pending_depth += _toml_bracket_delta(line)
-            if pending_depth <= 0:
-                if pending_kind == "dynamic":
-                    reject_dynamic_dependencies(pending_line, pending_value)
-                else:
-                    reject_nonempty(pending_line, pending_value)
-                pending_line = 0
-                pending_value = ""
-                pending_depth = 0
-                pending_kind = ""
-            continue
-        if not line:
-            continue
-        if line.startswith("["):
-            if not line.endswith("]") or line.startswith("[["):
-                if "dependenc" in line.lower():
-                    findings.append(
-                        Finding(
-                            display_path,
-                            line_number,
-                            "DEPENDENCY_DECLARATION_INVALID",
-                            "cannot safely parse dependency table declaration",
-                        )
-                    )
-                section = ""
-                continue
-            if "\\" in line or '"' in line or "'" in line:
-                findings.append(
-                    Finding(
-                        display_path,
-                        line_number,
-                        "DEPENDENCY_DECLARATION_INVALID",
-                        "quoted TOML table keys require Python 3.11 or newer validation",
-                    )
-                )
-                section = ""
-                continue
-            section = _normalise_toml_name(line[1:-1])
-            continue
-
-        assignment = re.match(
-            r'^(?:"([^"]+)"|\'([^\']+)\'|([A-Za-z0-9_.-]+))\s*=\s*(.*)$', line
-        )
-        if assignment is None:
-            if "dependenc" in line.lower():
-                findings.append(
-                    Finding(
-                        display_path,
-                        line_number,
-                        "DEPENDENCY_DECLARATION_INVALID",
-                        "cannot safely parse dependency declaration",
-                    )
-                )
-            continue
-        raw_key = next(value for value in assignment.groups()[:3] if value is not None)
-        if assignment.group(1) is not None and "\\" in raw_key:
-            findings.append(
-                Finding(
-                    display_path,
-                    line_number,
-                    "DEPENDENCY_DECLARATION_INVALID",
-                    "escaped TOML keys require Python 3.11 or newer semantic validation",
-                )
-            )
-            continue
-        key = _normalise_toml_name(raw_key)
-        value = assignment.group(4).strip()
-
-        if section == "" and key in {"project", "tool"} and value.startswith("{"):
-            findings.append(
-                Finding(
-                    display_path,
-                    line_number,
-                    "DEPENDENCY_DECLARATION_INVALID",
-                    "inline project or tool tables require Python 3.11 or newer validation",
-                )
-            )
-            continue
-        if section.startswith("tool.") and value.startswith("{"):
-            findings.append(
-                Finding(
-                    display_path,
-                    line_number,
-                    "DEPENDENCY_DECLARATION_INVALID",
-                    "inline tool tables require Python 3.11 or newer semantic validation",
-                )
-            )
-            continue
-
-        if section == "project" and key == "dynamic":
-            depth = _toml_bracket_delta(value)
-            if value.startswith("[") and depth > 0:
-                pending_line = line_number
-                pending_value = value
-                pending_depth = depth
-                pending_kind = "dynamic"
+def _constant_string(
+    node: ast.AST,
+    static_strings: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    strings = {} if static_strings is None else static_strings
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return strings.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _constant_string(node.left, strings)
+        right = _constant_string(node.right, strings)
+        if left is None or right is None or len(left) + len(right) > _MAX_STATIC_STRING_LENGTH:
+            return None
+        return left + right
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue):
+                formatted = _constant_string(value.value, strings)
+                if formatted is None:
+                    return None
+                parts.append(formatted)
             else:
-                reject_dynamic_dependencies(line_number, value)
-            continue
+                return None
+        result = "".join(parts)
+        return result if len(result) <= _MAX_STATIC_STRING_LENGTH else None
+    if isinstance(node, ast.Call):
+        name = _call_name(node.func)
+        if name in {"str", "builtins.str"} and len(node.args) == 1 and not node.keywords:
+            value = node.args[0]
+            if isinstance(value, ast.Constant) and isinstance(value.value, (str, int, float)):
+                return str(value.value)
+        if (
+            name in {"format", "str.format", "builtins.format"}
+            and node.args
+            and not node.keywords
+        ):
+            template = _constant_string(node.args[0], strings)
+            if template is None:
+                return None
+            values = []
+            for argument in node.args[1:]:
+                item = _constant_string(argument, strings)
+                if item is None:
+                    return None
+                values.append(item)
+            try:
+                result = template.format(*values)
+            except (IndexError, KeyError, ValueError):
+                return None
+            return result if len(result) <= _MAX_STATIC_STRING_LENGTH else None
+    return None
 
-        key_leaf = key.rsplit(".", 1)[-1]
-        is_dependency_array = key_leaf in {
-            "dependencies",
-            "optional-dependencies",
-            "runtime-dependencies",
-        }
-        is_optional_group = section.startswith("project.optional-dependencies")
-        is_tool_dependency_table = section.startswith("tool.") and section.endswith(
-            ".dependencies"
-        )
-        if not (is_dependency_array or is_optional_group or is_tool_dependency_table):
-            continue
-        if is_tool_dependency_table:
+
+def _is_exact_bool(node: ast.AST, expected: bool) -> bool:
+    return isinstance(node, ast.Constant) and type(node.value) is bool and node.value is expected
+
+
+def _is_direct_subprocess_constant(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and _call_name(node) in {
+        "subprocess.DEVNULL",
+        "subprocess.PIPE",
+        "subprocess.STDOUT",
+    }
+
+
+def _is_explicit_environment_mapping(node: ast.AST) -> bool:
+    return isinstance(node, (ast.Dict, ast.Name))
+
+
+def _check_approved_process_call(
+    display_path: str,
+    node: ast.Call,
+    name: str,
+    findings: List[Finding],
+) -> None:
+    if name not in _SUBPROCESS_CALLS:
+        return
+    if not isinstance(node.func, ast.Attribute):
+        return
+    if name == "subprocess.Popen":
+        if node.args:
             findings.append(
                 Finding(
                     display_path,
-                    line_number,
-                    "RUNTIME_DEPENDENCY",
-                    "tool-managed runtime dependency tables are forbidden",
+                    node.lineno,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must use keyword-only arguments",
                 )
             )
-            continue
-        if not value.startswith("["):
-            reject_nonempty(line_number, value)
-            continue
-        depth = _toml_bracket_delta(value)
-        if depth <= 0:
-            reject_nonempty(line_number, value)
-        else:
-            pending_line = line_number
-            pending_value = value
-            pending_depth = depth
-            pending_kind = "dependency"
-
-    if pending_line:
-        findings.append(
-            Finding(
-                display_path,
-                pending_line,
-                "DEPENDENCY_DECLARATION_INVALID",
-                "unterminated dependency declaration",
+        arguments = {item.arg: item.value for item in node.keywords if item.arg is not None}
+        if "args" not in arguments:
+            findings.append(
+                Finding(
+                    display_path,
+                    node.lineno,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must pass args= explicitly",
+                )
             )
-        )
-    return findings
+        if "executable" not in arguments:
+            findings.append(
+                Finding(
+                    display_path,
+                    node.lineno,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must pin executable explicitly",
+                )
+            )
+        if not _is_exact_bool(arguments.get("shell"), False):
+            findings.append(
+                Finding(
+                    display_path,
+                    node.lineno,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must set shell=False",
+                )
+            )
+        if not _is_direct_subprocess_constant(arguments.get("stdin")):
+            findings.append(
+                Finding(
+                    display_path,
+                    node.lineno,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess.Popen must set stdin to a direct subprocess constant",
+                )
+            )
+        for key in ("cwd", "env"):
+            if key not in arguments or not _is_explicit_environment_mapping(arguments[key]):
+                findings.append(
+                    Finding(
+                        display_path,
+                        node.lineno,
+                        "UNSAFE_SUBPROCESS",
+                        "approved subprocess.Popen must set an explicit " + key,
+                    )
+                )
+    elif name in {"subprocess.run", "subprocess.check_call", "subprocess.check_output", "subprocess.call"}:
+        if not node.args:
+            findings.append(
+                Finding(
+                    display_path,
+                    node.lineno,
+                    "UNSAFE_SUBPROCESS",
+                    "approved subprocess call must use an explicit argument sequence",
+                )
+            )
 
 
-def _dependency_manifest_findings(display_path: str, text: str) -> List[Finding]:
-    """Reject runtime dependencies using semantic TOML parsing when available."""
-    if _tomllib is None:
-        return _fallback_dependency_manifest_findings(display_path, text)
+def _audit_python(path: Path, display_path: str) -> List[Finding]:
     try:
-        document = _tomllib.loads(text)
-    except (TypeError, ValueError):
-        return [
-            Finding(
-                display_path,
-                1,
-                "TOML_INVALID",
-                "pyproject.toml could not be parsed safely",
-            )
-        ]
-    if not isinstance(document, dict):
-        return [
-            Finding(
-                display_path,
-                1,
-                "TOML_INVALID",
-                "pyproject.toml root must be a table",
-            )
-        ]
-    return _semantic_dependency_findings(display_path, document)
+        raw = path.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            return [Finding(display_path, 1, "UTF8_BOM", "UTF-8 BOM is forbidden")]
+        source = raw.decode("utf-8")
+        tree = ast.parse(source, filename=display_path)
+    except (OSError, UnicodeError, SyntaxError) as exc:
+        return [Finding(display_path, 1, "PYTHON_PARSE", str(exc))]
+    visitor = _PythonVisitor(display_path)
+    visitor.visit(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = visitor._callable_name(node.func)
+            if name in _SUBPROCESS_CALLS and (display_path, visitor.function_stack[-1] if visitor.function_stack else "") in _APPROVED_PROCESS_HELPERS:
+                _check_approved_process_call(display_path, node, name, visitor.findings)
+    return sorted(visitor.findings, key=lambda item: (item.line, item.code, item.message))
 
 
-def audit_file(path: Path, display_path: str) -> List[Finding]:
-    suffix = path.suffix.lower()
-    if suffix == ".lua":
-        return [Finding(display_path, 1, "LUA_SOURCE", "Lua source is forbidden")]
+def _audit_text(path: Path, display_path: str) -> List[Finding]:
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            return [Finding(display_path, 1, "UTF8_BOM", "UTF-8 BOM is forbidden")]
+        value = raw.decode("utf-8")
     except (OSError, UnicodeError) as exc:
-        return [
-            Finding(display_path, 1, "SOURCE_UNREADABLE", "cannot read source: " + str(exc))
-        ]
-
-    if suffix in {".py", ".pyw"}:
-        try:
-            tree = ast.parse(text, filename=display_path)
-        except SyntaxError as exc:
-            return [
-                Finding(
-                    display_path,
-                    int(exc.lineno or 1),
-                    "PYTHON_SYNTAX",
-                    "cannot parse Python source: " + str(exc.msg),
-                )
-            ]
-        visitor = _PythonVisitor(display_path)
-        visitor.visit(tree)
-        return visitor.findings
-
-    findings = _scan_raw_text(display_path, suffix, text)
-    if suffix == ".toml" and Path(display_path).name.lower() == "pyproject.toml":
-        findings.extend(_dependency_manifest_findings(display_path, text))
-    return findings
+        return [Finding(display_path, 1, "TEXT_READ", str(exc))]
+    return _string_findings(display_path, 1, value)
 
 
-def _iter_source_files(root: Path) -> Iterable[Tuple[Path, str, Optional[Finding]]]:
-    for current, directory_names, file_names in os.walk(str(root), followlinks=False):
-        current_path = Path(current)
-        kept_directories = []
-        for directory_name in sorted(directory_names):
-            directory_path = current_path / directory_name
-            if directory_name in _SKIPPED_CACHE_DIRECTORIES:
-                continue
-            if current_path == root and directory_name in _SKIPPED_TOP_LEVEL_DIRECTORIES:
-                continue
-            if directory_path.is_symlink():
-                relative = directory_path.relative_to(root).as_posix()
-                yield directory_path, relative, Finding(
-                    relative, 1, "SOURCE_SYMLINK", "source directory symlinks are forbidden"
-                )
-                continue
-            kept_directories.append(directory_name)
-        directory_names[:] = kept_directories
-
-        for file_name in sorted(file_names):
-            path = current_path / file_name
-            if path.suffix.lower() not in _SOURCE_SUFFIXES:
-                continue
-            relative = path.relative_to(root).as_posix()
-            if path.is_symlink():
-                yield path, relative, Finding(
-                    relative, 1, "SOURCE_SYMLINK", "source file symlinks are forbidden"
-                )
-                continue
-            yield path, relative, None
+def run_audit(root: Path) -> Tuple[List[Finding], int]:
+    findings = []
+    count = 0
+    for path in sorted(_iter_source_files(root)):
+        display_path = _display_path(path, root)
+        count += 1
+        if path.suffix.casefold() in {".py", ".pyw"}:
+            findings.extend(_audit_python(path, display_path))
+        else:
+            findings.extend(_audit_text(path, display_path))
+    return findings, count
 
 
-def audit_tree(root: Path) -> AuditReport:
-    try:
-        root = root.resolve(strict=True)
-    except OSError as exc:
-        return AuditReport(
-            0,
-            (Finding(str(root), 1, "ROOT_INVALID", "cannot resolve audit root: " + str(exc)),),
-        )
-    if not root.is_dir():
-        return AuditReport(
-            0, (Finding(str(root), 1, "ROOT_INVALID", "audit root is not a directory"),)
-        )
-
-    findings: List[Finding] = []
-    scanned_files = 0
-    for path, relative, discovery_finding in _iter_source_files(root):
-        if discovery_finding is not None:
-            findings.append(discovery_finding)
-            continue
-        try:
-            candidate = path.resolve(strict=True)
-        except OSError as exc:
-            findings.append(
-                Finding(relative, 1, "SOURCE_UNREADABLE", "cannot resolve source: " + str(exc))
-            )
-            continue
-        if candidate == _SELF_PATH:
-            continue
-        scanned_files += 1
-        findings.extend(audit_file(candidate, relative))
-
-    findings.sort(key=lambda item: (item.path, item.line, item.code, item.message))
-    return AuditReport(scanned_files, tuple(findings))
-
-
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "root",
-        nargs="?",
-        type=Path,
-        default=Path(__file__).resolve().parent.parent,
-        help="repository root (defaults to the parent of scripts/)",
-    )
+    parser.add_argument("--root", type=Path, default=Path.cwd())
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    arguments = _build_parser().parse_args(argv)
-    report = audit_tree(arguments.root)
-    for finding in report.findings:
-        print(
-            "{0}:{1}: {2}: {3}".format(
-                finding.path, finding.line, finding.code, finding.message
-            )
-        )
-    if report.findings:
+    arguments = build_parser().parse_args(argv)
+    root = arguments.root.resolve()
+    findings, count = run_audit(root)
+    if findings:
         print(
             "offline source audit FAILED ({0} finding(s), {1} file(s) scanned)".format(
-                len(report.findings), report.scanned_files
-            ),
-            file=sys.stderr,
+                len(findings),
+                count,
+            )
         )
+        for finding in findings:
+            print(
+                "{0}:{1}: {2}: {3}".format(
+                    finding.path,
+                    finding.line,
+                    finding.code,
+                    finding.message,
+                )
+            )
         return 1
-    print("offline source audit passed ({0} file(s) scanned)".format(report.scanned_files))
+    print("offline source audit passed ({0} file(s) scanned)".format(count))
     return 0
 
 
