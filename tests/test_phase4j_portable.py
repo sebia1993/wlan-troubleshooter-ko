@@ -12,20 +12,13 @@ class Phase4JPortableTests(unittest.TestCase):
     def text(self, relative):
         return (self.root / relative).read_text(encoding="utf-8")
 
-    def test_release_metadata_is_exact(self):
+    def test_phase4j_schema_and_profile_remain_available(self):
         project = self.text("pyproject.toml")
-        for value in (
-            'version = "0.12.0a1"',
-            'phase = "4J"',
-            'field-profile-version = "0.6.0"',
-            'eapol-replay-relation-version = "1"',
-            'release-tag = "v0.12.0-alpha.1"',
-        ):
-            self.assertIn(value, project)
-        release = self.text(".github/workflows/preview-release.yml")
-        self.assertIn('if ($Tag -ne "v0.12.0-alpha.1"', release)
+        self.assertIn('field-profile-version = "0.6.0"', project)
+        self.assertIn('eapol-handshake-version = "1"', project)
+        self.assertIn('eapol-replay-relation-version = "1"', project)
 
-    def test_workflows_require_replay_relation_gate(self):
+    def test_workflows_preserve_replay_relation_gate(self):
         for relative in (
             ".github/workflows/windows-portable.yml",
             ".github/workflows/preview-release.yml",
@@ -35,7 +28,7 @@ class Phase4JPortableTests(unittest.TestCase):
                 self.assertIn("verify_eapol_handshakes.ps1", text)
                 self.assertIn("verify_eapol_replay_relations.ps1", text)
 
-    def test_finalizer_enables_relation_runtime_and_disables_raw_values(self):
+    def test_finalizer_preserves_relation_runtime_and_raw_value_protection(self):
         text = self.text("tests/portable_build/finalize_portable.ps1")
         for value in (
             'eapol_replay_relation_runtime = "enabled"',
