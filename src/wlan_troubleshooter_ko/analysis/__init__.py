@@ -1,4 +1,4 @@
-"""결정론적 캡처 점검부터 PCAPNG 통계·EAPOL 관계까지의 공개 API."""
+"""결정론적 캡처 점검부터 상대 시간·PCAPNG 통계·EAPOL 관계까지의 공개 API."""
 
 from wlan_troubleshooter_ko.analysis.capture_observability import (
     CaptureObservabilityError,
@@ -6,6 +6,14 @@ from wlan_troubleshooter_ko.analysis.capture_observability import (
     IncompleteAttemptAssessment,
     ProtocolVisibility,
     build_capture_observability,
+)
+from wlan_troubleshooter_ko.analysis.capture_time_boundaries import (
+    CaptureTimeBoundaryError,
+    CaptureTimeBoundaryReport,
+    CaptureTimeIndex,
+    TransactionTimeBoundary,
+    build_capture_time_boundaries,
+    build_capture_time_index,
 )
 from wlan_troubleshooter_ko.analysis import device_journeys as _device_journeys
 from wlan_troubleshooter_ko.analysis.device_journey_normalizer import (
@@ -101,6 +109,9 @@ __all__ = [
     "CaptureObservabilityReport",
     "CaptureStructure",
     "CaptureStructureError",
+    "CaptureTimeBoundaryError",
+    "CaptureTimeBoundaryReport",
+    "CaptureTimeIndex",
     "CounterObservation",
     "DeviceAttemptLink",
     "DeviceJourney",
@@ -138,8 +149,11 @@ __all__ = [
     "TransactionAttempt",
     "TransactionSessionError",
     "TransactionSessionReport",
+    "TransactionTimeBoundary",
     "analyze_capture",
     "build_capture_observability",
+    "build_capture_time_boundaries",
+    "build_capture_time_index",
     "build_device_journeys",
     "build_device_sessions",
     "build_eapol_handshakes",

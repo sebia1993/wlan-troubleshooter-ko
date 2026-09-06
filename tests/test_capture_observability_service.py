@@ -56,6 +56,42 @@ class FakeReplayReport:
         }
 
 
+class FakeTimeReport:
+    def to_dict(self):
+        return {
+            "schema_version": 1,
+            "profile_id": "capture-time-boundaries",
+            "profile_version": "0.6.0",
+            "frames_observed": 2,
+            "expected_frames": 2,
+            "complete": True,
+            "first_frame": 1,
+            "last_frame": 2,
+            "first_to_last_relative_ms": 1000,
+            "minimum_relative_ms": 0,
+            "maximum_relative_ms": 1000,
+            "observed_span_ms": 1000,
+            "timestamp_regressions": 0,
+            "regression_evidence_frames": [],
+            "regression_evidence_frames_omitted": 0,
+            "boundary_threshold_ms": 1000,
+            "transaction_source_complete": True,
+            "transaction_attempts_total": 0,
+            "transaction_boundaries_total": 0,
+            "transaction_boundaries_by_state": {},
+            "transaction_boundaries": [],
+            "absolute_timestamps_serialized": False,
+            "capture_start_proven": False,
+            "capture_end_proven": False,
+            "incident_window_fully_covered": False,
+            "response_wait_sufficiency_assessed": False,
+            "response_absence_confirmed": False,
+            "capture_loss_excluded": False,
+            "root_cause_confirmed": False,
+            "cautions": [],
+        }
+
+
 class FakeStatisticsReport:
     def to_dict(self):
         return {
@@ -160,6 +196,9 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         )
 
     @mock.patch(
+        "wlan_troubleshooter_ko.analysis.service.run_capture_time_boundary_analysis"
+    )
+    @mock.patch(
         "wlan_troubleshooter_ko.analysis.service.run_eapol_replay_relation_analysis"
     )
     @mock.patch("wlan_troubleshooter_ko.analysis.service.run_connection_analysis")
@@ -171,7 +210,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
     @mock.patch("wlan_troubleshooter_ko.analysis.service.classify_capture_capabilities")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.inspect_capture_structure")
     @mock.patch("wlan_troubleshooter_ko.analysis.service.validate_capture")
-    def test_completed_service_serializes_observability_eapol_replay_and_statistics_boundaries(
+    def test_completed_service_serializes_observability_time_eapol_replay_and_statistics_boundaries(
         self,
         validate_capture_mock,
         inspect_structure_mock,
@@ -181,6 +220,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         rules_mock,
         run_mock,
         replay_mock,
+        time_mock,
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -207,6 +247,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
                 self.empty_devices(),
             )
             replay_mock.return_value = FakeReplayReport()
+            time_mock.return_value = FakeTimeReport()
 
             result = analyze_capture(
                 capture_path,
@@ -224,6 +265,15 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertFalse(statistics["supported_capture_format"])
         self.assertFalse(statistics["capture_loss_excluded"])
         self.assertFalse(statistics["specific_packet_loss_confirmed"])
+        self.assertIsNotNone(result.capture_time_boundaries)
+        timing = serialized["capture_time_boundaries"]
+        self.assertEqual(timing["schema_version"], 1)
+        self.assertEqual(timing["observed_span_ms"], 1000)
+        self.assertFalse(timing["absolute_timestamps_serialized"])
+        self.assertFalse(timing["capture_start_proven"])
+        self.assertFalse(timing["capture_end_proven"])
+        self.assertFalse(timing["response_wait_sufficiency_assessed"])
+        self.assertFalse(timing["response_absence_confirmed"])
         self.assertIsNotNone(result.capture_observability)
         self.assertIsNotNone(result.eapol_handshakes)
         self.assertIsNotNone(result.eapol_replay_relations)
@@ -249,6 +299,10 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertNotIn(capture_path.name, str(serialized))
         statistics_mock.assert_called_once_with(capture, cancel_event=None)
         run_mock.assert_called_once()
+        time_mock.assert_called_once()
+        self.assertIs(time_mock.call_args.kwargs["expected_capture"], capture)
+        self.assertEqual(time_mock.call_args.kwargs["expected_frames"], 2)
+        self.assertIs(time_mock.call_args.args[4], transactions)
         replay_mock.assert_called_once()
         self.assertIs(replay_mock.call_args.kwargs["expected_capture"], capture)
         self.assertEqual(
@@ -260,6 +314,9 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
             "m" * 64,
         )
 
+    @mock.patch(
+        "wlan_troubleshooter_ko.analysis.service.run_capture_time_boundary_analysis"
+    )
     @mock.patch(
         "wlan_troubleshooter_ko.analysis.service.run_eapol_replay_relation_analysis"
     )
@@ -282,6 +339,7 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         rules_mock,
         run_mock,
         replay_mock,
+        time_mock,
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -315,11 +373,13 @@ class CaptureObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(result.inventory_state, "failed")
         self.assertIsNone(result.protocol_inventory)
         self.assertIsNone(result.capture_observability)
+        self.assertIsNone(result.capture_time_boundaries)
         self.assertIsNone(result.eapol_handshakes)
         self.assertIsNone(result.eapol_replay_relations)
         self.assertIsNotNone(result.pcapng_interface_statistics)
         self.assertIn("후속 분석", result.inventory_message)
         statistics_mock.assert_called_once_with(capture, cancel_event=None)
+        time_mock.assert_not_called()
         replay_mock.assert_not_called()
 
 

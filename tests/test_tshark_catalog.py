@@ -56,14 +56,19 @@ class TSharkCatalogTests(unittest.TestCase):
                 "connection-events",
                 "device-identities",
                 "eapol-replay-relations",
+                "capture-time-boundaries",
             },
         )
         self.assertTrue(catalog.has_field("frame.protocols"))
 
-    def test_connection_and_identity_profiles_require_time_epoch(self):
+    def test_connection_identity_and_time_profiles_require_time_epoch(self):
         registry = load_field_profiles(self.registry_path())
         catalog = parse_field_catalog(CATALOG_LINES)
-        for profile_id in ("connection-events", "device-identities"):
+        for profile_id in (
+            "connection-events",
+            "device-identities",
+            "capture-time-boundaries",
+        ):
             with self.subTest(profile_id=profile_id):
                 with self.assertRaises(FieldCompatibilityError):
                     resolve_profile(registry, catalog, profile_id)
@@ -76,10 +81,21 @@ class TSharkCatalogTests(unittest.TestCase):
         )
         events = resolve_profile(registry, extended, "connection-events")
         identities = resolve_profile(registry, extended, "device-identities")
+        timing = resolve_profile(registry, extended, "capture-time-boundaries")
         self.assertEqual(events.profile_version, "0.6.0")
         self.assertEqual(identities.profile_version, "0.6.0")
+        self.assertEqual(timing.profile_version, "0.6.0")
         self.assertIn("frame.time_epoch", events.headers())
         self.assertIn("frame.time_epoch", identities.headers())
+        self.assertEqual(
+            timing.headers(),
+            ("frame.number", "frame.time_epoch"),
+        )
+        self.assertEqual(
+            timing.output_keys(),
+            ("frame_number", "time_epoch"),
+        )
+        self.assertEqual(timing.missing_optional_fields, ())
         self.assertIn("eap_code", events.missing_optional_fields)
         self.assertIn("eth_source", identities.missing_optional_fields)
         self.assertIn("wlan_bssid", identities.missing_optional_fields)

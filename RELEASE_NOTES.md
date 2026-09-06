@@ -1,172 +1,45 @@
-# v0.13.0-alpha.1 — PCAPNG 인터페이스 드롭 통계 프리뷰
+# v0.14.0-alpha.1 — 캡처 상대 시간·거래 경계 프리뷰
 
-이번 릴리스는 기존 캡처 품질·Finding·단말 관찰·EAPOL 분석에 PCAPNG Interface Statistics Block(ISB) 분석을 추가합니다.
+PCAP·PCAPNG의 첫 분석 프레임 기준 상대 시간과 거래별 관찰 창을 추가했습니다. 내장 TShark를 사용하며 Python과 Wireshark를 대상 PC에 따로 설치하지 않습니다.
 
-PCAPNG에 기록된 수신·드롭 Counter를 로컬에서 직접 읽되, 실제 인터페이스 이름·설명·운영체제·캡처 애플리케이션·주석·절대 시각은 결과에 기록하지 않습니다.
+## 사용
 
-## 사용 방법
-
-1. `WlanTroubleshooterKO-v0.13.0-alpha.1-win64-portable.zip`을 받습니다.
-2. 같은 이름의 `.sha256` 파일과 ZIP SHA-256을 비교합니다.
-3. ZIP을 로컬 폴더에 완전히 압축 해제합니다.
-4. `WlanTroubleshooterKO.exe`를 실행하고 PCAP 또는 PCAPNG를 선택합니다.
-
-Python, Wireshark, 관리자 권한과 인터넷 연결은 필요하지 않습니다.
+`WlanTroubleshooterKO-v0.14.0-alpha.1-win64-portable.zip`과 같은 이름의 `.sha256` 파일을 비교한 뒤 로컬 폴더에 완전히 압축 해제하고 `WlanTroubleshooterKO.exe`를 실행합니다. ZIP 안에서 바로 실행하지 않습니다. 제품 분석에는 AI·인터넷·외부 API·업로드·텔레메트리·자동 업데이트를 사용하지 않습니다.
 
 ## 새 기능
 
-- PCAPNG Section Header Block의 섹션별 little/big-endian 처리
-- Interface Description Block 선언 순서에 따른 `IFACE-N`
-- `isb_ifrecv`, `isb_ifdrop`, `isb_filteraccept`, `isb_osdrop`, `isb_usrdeliv`
-- 여러 ISB의 Counter 관찰 횟수·첫·마지막 보고값
-- Counter 증가·감소·변화 없음 구분
-- GUI `[12. PCAPNG 인터페이스 통계]`
-- 최상위 분석 JSON 스키마 2를 유지하는 `pcapng_interface_statistics`
-- 내장 TShark가 없는 소스 실행 모드에서도 PCAPNG 통계 제공
+- GUI `[13. 캡처 상대 시간과 거래 경계]`
+- 첫→마지막 상대 시간, 최소·최대·관찰 span
+- 패킷 상한을 반영한 전체·일부 분석 구분
+- 표시 반올림 전 시간 역행 탐지, 제한된 근거 프레임과 생략 수
+- EAP·RADIUS·DHCP·DNS·TCP 거래별 시작 거리·종료 뒤 관찰 시간
+- 시간 역행 거래의 이벤트 시간 범위와 양 끝 프레임 시간차를 구분
+- 승인된 두 필드·필터·행 상한과 캡처·내장 TShark 지문 재검증
+- 기존 Finding·타임라인·거래·DEVICE-N·여정·EAPOL·PCAPNG 통계 유지
+- 최상위 JSON 스키마 2 유지
 
-## 상태
+## 쉽게 읽는 예
 
-```text
-reported-drop-observed
-zero-reported-drop-counters
-statistics-without-drop-counters
-no-interface-statistics
-unsupported-capture-format
-```
+분석 창이 3000ms이고 DNS 요청이 +250ms에 있으면 요청 뒤 2750ms를 더 관찰했다는 뜻입니다. 마지막 +3000ms에 있는 DNS 요청은 그 뒤 관찰 시간이 0ms입니다. 어느 경우도 DNS 서버 장애나 실제 미응답을 자동 확정하지 않습니다.
 
-Counter 변화:
+기본 1000ms 경계 표시는 요청이 분석 창의 시작·끝에 가까운지 보여줄 뿐 프로토콜 응답 타임아웃이 아닙니다. 일부 프레임만 처리했으면 분석 창 끝을 파일 전체 끝으로 해석하지 않습니다.
 
-```text
-not-reported
-single-value-observed
-counter-increase-observed
-counter-decrease-observed
-counter-unchanged-observed
-```
+## 보호 경계
 
-여러 ISB는 누적 스냅샷일 수 있으므로 값을 합산하지 않습니다.
+원본 주소·사용자명·DNS 질의명·절대 epoch·캡처 파일명·경로·키 원문을 결과에 추가하지 않습니다. `capture_start_proven`, `capture_end_proven`, `incident_window_fully_covered`, `response_wait_sufficiency_assessed`, `response_absence_confirmed`, `capture_loss_excluded`, `root_cause_confirmed`는 항상 false입니다.
 
-## 해석 제한
+## 검증
 
-다음 값은 항상 `false`입니다.
+Windows CI와 Python·Wireshark 외부 설치본을 사용할 수 없도록 PATH를 제한한 Portable EXE 검증을 사용합니다. 합성 PCAPNG의 두 DNS 요청(+250ms, +3000ms)에서 관찰 창과 비식별 결과를 확인합니다. 실제 사내 캡처는 저장소나 Actions에 업로드하지 않습니다.
 
-```text
-raw_interface_identifiers_serialized
-absolute_timestamps_serialized
-capture_loss_excluded
-specific_packet_loss_confirmed
-root_cause_confirmed
-```
+## 알려진 제한
 
-다음 결론을 자동으로 내리지 않습니다.
+- 시간 역행 모듈의 회귀 테스트 통과가 모든 역행 캡처의 전체 분석 성공을 보장하지 않습니다.
+- 타임스탬프 없는 프레임·다중 인터페이스 시계는 추가 검증이 필요합니다.
+- 프레임별 DEVICE/AP 연결·로밍, RSSI·채널·데이터율 RF 관찰은 아직 구현되지 않았습니다.
+- Aruba·ClearPass 맞춤 안내, 최종 HTML 보고서, 대용량 성능·실제 Windows 11/EDR/차단망 검증은 후속 작업입니다.
+- 상용 코드 서명이 없어 게시자 경고가 나타날 수 있습니다.
 
-```text
-드롭 Counter 0 → 캡처 손실 없음
-ISB 없음 → 캡처 손실 없음
-양수 드롭 → 특정 DHCP·DNS·RADIUS·EAPOL 패킷 누락
-양수 드롭 → RF·AP·단말·SPAN 장애
-Counter 감소 → 캡처 도구 재시작·초기화·wrap
-```
+## 자산
 
-## 개인정보·메타데이터 보호
-
-PCAPNG에 다음 값이 들어 있어도 GUI·JSON·로그에 기록하지 않습니다.
-
-```text
-인터페이스 이름·설명·GUID·장치 경로
-하드웨어·운영체제·캡처 애플리케이션 문자열
-캡처 필터
-Section·Interface·Packet·Statistics 주석
-ISB 절대 Timestamp와 starttime·endtime
-원본 MAC·BSSID·SSID
-IP 주소·포트·사용자명·호스트명
-캡처 파일명·절대경로
-```
-
-기존 보호 경계도 유지합니다.
-
-```text
-Replay Counter 원문
-Nonce·MIC·Key Data
-HMAC 키·내부 토큰
-Raw Payload·자격 증명
-TShark stderr 원문
-```
-
-제품 런타임에는 AI·LLM·Ollama·외부 API·네트워크 통신·텔레메트리·자동 업데이트가 없습니다.
-
-## Portable 실제 검증
-
-런타임 생성 PCAPNG 구성:
-
-```text
-Section Header Block 1개
-Interface Description Block 1개
-Ethernet Enhanced Packet Block 2개
-Interface Statistics Block 2개
-```
-
-첫 통계 스냅샷:
-
-```text
-ifrecv=2
-ifdrop=0
-filteraccept=2
-osdrop=0
-usrdeliv=2
-```
-
-둘째 통계 스냅샷:
-
-```text
-ifrecv=4
-ifdrop=3
-filteraccept=4
-osdrop=1
-usrdeliv=4
-```
-
-기대 공개 결과:
-
-```text
-IFACE-1
-statistics_blocks=2
-state=reported-drop-observed
-ifrecv: first=2, last=4, counter-increase-observed
-ifdrop: first=0, last=3, counter-increase-observed
-osdrop: first=0, last=1, counter-increase-observed
-capture_loss_excluded=false
-specific_packet_loss_confirmed=false
-root_cause_confirmed=false
-```
-
-합성 PCAPNG에는 인터페이스 이름·설명, 하드웨어·운영체제·캡처 앱, 패킷·통계 주석, 절대 시각, 원본 MAC·IP를 의도적으로 넣습니다. 최종 JSON에서 해당 값이 발견되면 검증을 실패시킵니다.
-
-최종 EXE는 `PYTHONPATH`·`PYTHONHOME`을 제거하고 PATH를 Windows 시스템 폴더로 제한한 상태에서 실행합니다. 외부 Python·Wireshark를 사용하지 않으며 분석 전후 Portable 폴더 무변경도 확인합니다.
-
-## 호환성
-
-- 최상위 분석 JSON `schema_version = 2` 유지
-- 기존 프로토콜 인벤토리·Finding·이벤트·거래·DEVICE-N·단말 여정·미응답 경계·EAPOL 순서·Replay Counter 관계 유지
-- 일반 PCAP은 `unsupported-capture-format` 통계 보고서 제공
-- PCAPNG 파서 오류는 TShark 실행 전에 실패-폐쇄 처리
-
-## 아직 지원하지 않는 기능
-
-- 드롭 Counter로 특정 누락 패킷 식별
-- 캡처 시작·종료가 장애 전체 구간을 포함했는지 자동 증명
-- 응답 미관찰을 실제 미응답으로 확정
-- 프레임별 비식별 DEVICE/AP 로밍 연결
-- RSSI·채널·데이터율 기반 RF 분석
-- Aruba Controller·ClearPass 맞춤 점검 안내
-- 단일 오프라인 한국어 HTML 보고서
-- 실제 사내 캡처 검증
-- 상용 코드 서명
-
-## 릴리스 자산
-
-- `WlanTroubleshooterKO-v0.13.0-alpha.1-win64-portable.zip`
-- `WlanTroubleshooterKO-v0.13.0-alpha.1-win64-portable.zip.sha256`
-- `wireshark-4.6.8.tar.xz`
-- `wireshark-4.6.8.tar.xz.sha256`
-- `supply-chain-observed.json`
+사용자 실행 파일은 `WlanTroubleshooterKO-v0.14.0-alpha.1-win64-portable.zip`입니다. `.sha256`은 무결성 확인용이고, Wireshark 소스 및 공급망 기록은 라이선스·재현성 증거입니다. 소스 압축파일은 사용자 실행용이 아닙니다.

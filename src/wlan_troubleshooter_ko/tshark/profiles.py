@@ -39,6 +39,10 @@ _PROFILE_REQUIRED_OUTPUT_KEYS = {
     "eapol-replay-relations": {
         "frame_number",
     },
+    "capture-time-boundaries": {
+        "frame_number",
+        "time_epoch",
+    },
 }
 
 

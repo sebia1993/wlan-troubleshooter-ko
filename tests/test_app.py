@@ -17,7 +17,7 @@ def minimal_pcap():
 class AppSmokeTests(unittest.TestCase):
     def test_self_check_without_window_or_network(self):
         result = self_check()
-        self.assertEqual(result["phase"], "4K")
+        self.assertEqual(result["phase"], "4L")
         self.assertEqual(result["runtime_dependencies"], "0")
         self.assertEqual(result["network_features"], "없음")
         self.assertEqual(result["ruleset_version"], "0.2.0")
@@ -27,6 +27,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["event_field_count"], "32")
         self.assertEqual(result["identity_field_count"], "13")
         self.assertEqual(result["replay_relation_field_count"], "3")
+        self.assertEqual(result["capture_time_field_count"], "2")
         self.assertEqual(result["transaction_session_schema_version"], "1")
         self.assertEqual(result["device_session_schema_version"], "1")
         self.assertEqual(result["device_journey_schema_version"], "1")
@@ -34,13 +35,18 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["eapol_handshake_schema_version"], "1")
         self.assertEqual(result["eapol_replay_relation_schema_version"], "1")
         self.assertEqual(result["pcapng_interface_statistics_schema_version"], "1")
+        self.assertEqual(result["capture_time_boundary_schema_version"], "1")
         self.assertEqual(result["protocol_group_count"], "12")
         self.assertEqual(result["python_external_required"], "true")
         self.assertEqual(result["tshark_external_required"], "true")
         self.assertIn("PCAPNG 인터페이스 통계", result["analysis_features"])
+        self.assertIn("캡처 상대 시간·거래 경계", result["analysis_features"])
         self.assertIn("Replay Counter 관계", result["analysis_features"])
         self.assertIn("HMAC 키 미저장", result["identity_privacy"])
         self.assertIn("응답 미관찰만으로 실패 확정 금지", result["absence_boundary"])
+        self.assertIn("전용 최소 프로파일", result["capture_time_boundary"])
+        self.assertIn("절대 epoch 미직렬화", result["capture_time_boundary"])
+        self.assertIn("응답 대기 충분성", result["capture_time_boundary"])
         self.assertIn("Counter 원문 미직렬화", result["eapol_handshake_boundary"])
         self.assertIn("Counter 숫자 미출력", result["eapol_replay_boundary"])
         self.assertIn("인터페이스 이름", result["pcapng_statistics_boundary"])
@@ -54,11 +60,13 @@ class AppSmokeTests(unittest.TestCase):
             value = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(value["network_features"], "없음")
             self.assertEqual(value["python_external_required"], "true")
-            self.assertEqual(value["phase"], "4K")
+            self.assertEqual(value["phase"], "4L")
             self.assertEqual(value["field_profile_version"], "0.6.0")
             self.assertEqual(value["identity_field_count"], "13")
             self.assertEqual(value["replay_relation_field_count"], "3")
+            self.assertEqual(value["capture_time_field_count"], "2")
             self.assertEqual(value["pcapng_interface_statistics_schema_version"], "1")
+            self.assertEqual(value["capture_time_boundary_schema_version"], "1")
             with self.assertRaises(FileExistsError):
                 main(["--self-check-output=" + str(output)])
 
@@ -66,7 +74,7 @@ class AppSmokeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             main(["--self-check-output=https://example.invalid/output.json"])
 
-    def test_noninteractive_analysis_writes_path_free_statistics_result(self):
+    def test_noninteractive_source_mode_is_path_free_and_time_is_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
             capture = Path(directory).resolve() / "private-capture.pcap"
             output = Path(directory).resolve() / "analysis.json"
@@ -91,6 +99,7 @@ class AppSmokeTests(unittest.TestCase):
             self.assertFalse(statistics["capture_loss_excluded"])
             self.assertFalse(statistics["specific_packet_loss_confirmed"])
             self.assertFalse(statistics["root_cause_confirmed"])
+            self.assertIsNone(value["capture_time_boundaries"])
             self.assertIsNone(value["capture_observability"])
             self.assertIsNone(value["eapol_handshakes"])
             self.assertIsNone(value["eapol_replay_relations"])
@@ -118,6 +127,8 @@ class AppSmokeTests(unittest.TestCase):
             self.assertIn("Replay Counter 관계", state.detail)
             self.assertIn("PCAPNG 인터페이스 통계", state.detail)
             self.assertIn("일반 PCAP", state.detail)
+            self.assertIn("캡처 상대 시간과 거래 경계", state.detail)
+            self.assertIn("상대 시간 결과가 없습니다", state.detail)
             self.assertNotIn(str(capture), state.detail)
             self.assertIsNotNone(view_model.structure)
             self.assertIsNotNone(view_model.capabilities)

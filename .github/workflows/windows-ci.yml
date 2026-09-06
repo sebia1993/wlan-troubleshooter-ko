@@ -15,10 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  phase-0-4k-validation:
-    name: Phase 0-4K offline validation
+  phase-0-4l-validation:
+    name: Phase 0-4L offline validation
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     env:
       PYTHONHASHSEED: "0"
       PYTHONIOENCODING: utf-8
