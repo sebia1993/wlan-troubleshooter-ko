@@ -4,6 +4,18 @@ Windows 11에서 PCAP·PCAPNG를 외부로 보내지 않고 로컬에서 분석�
 
 제품 런타임에는 AI·LLM·Ollama·MCP·외부 API·인터넷 조회·텔레메트리·자동 업데이트가 없습니다.
 
+## 네트워크 엔지니어 포트폴리오 검토
+
+이 프로젝트는 **오프라인 PCAP 1차 분류와 패킷 근거 정리용 사전릴리스**입니다. 자동 근본 원인 확정이나 Wireshark 대체 도구로 제시하지 않습니다.
+
+| 검토할 역량 | 확인할 근거 |
+|---|---|
+| 캡처에 보이는 사실과 판단 한계 구분 | [설계·코드·합성 재현 안내](docs/PORTFOLIO_KO.md), [PCAPNG 통계 해석](docs/PHASE_4K_PLAN.md) |
+| 사내 데이터 반출 경로와 식별정보 제한 | [오프라인 ADR](docs/adr/0001-no-ai-and-no-network.md), [실행별 가명 ADR](docs/adr/0004-analysis-scoped-device-pseudonyms.md) |
+| 검증과 배포 추적 | [Windows CI](https://github.com/sebia1993/wlan-troubleshooter-ko/actions/workflows/windows-ci.yml), [공개 릴리스](https://github.com/sebia1993/wlan-troubleshooter-ko/releases) |
+
+**알려진 정확도 제한:** `60667ab` 소스에서 SYN/ACK 반복을 TCP 연결 성공으로 표시하고, 서로 다른 UDP stream의 같은 DNS ID를 완결 거래로 묶는 합성 반례가 재현됐습니다. [적용 버전·재현 조건·후속 검증](docs/PORTFOLIO_KO.md#알려진-상관-정확도-제한)을 확인하고 성공·완결 요약은 근거 프레임과 함께 검토하십시오. 이 문서 개선에는 분석 엔진 수정이 포함되지 않습니다.
+
 ## 실행 방법
 
 `v0.13.0-alpha.1` 릴리스의 다음 파일을 사용합니다.

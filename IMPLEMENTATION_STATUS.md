@@ -4,6 +4,8 @@
 
 ## 현재 상태
 
+2026-09-08 공개 기본 브랜치 `60667ab`와 GitHub Actions·릴리스 목록 확인 기준입니다. 진행 중인 PR #19의 상태는 포함하지 않습니다. **기존 테스트 통과와 분석 정확도는 별개이며, [TCP·DNS 상관 반례](docs/PORTFOLIO_KO.md#알려진-상관-정확도-제한)가 확인되어 보완이 필요합니다.**
+
 | 구분 | 상태 | 근거 |
 |---|---|---|
 | Phase 0~3 기반·Portable | 구현 완료·검증 통과 | 오프라인 보안 경계, PCAP/PCAPNG, 내장 TShark |
@@ -15,9 +17,9 @@
 | Phase 4F 단말 관찰 여정 | 구현 완료·릴리스 게시 | 실제 프레임 순서와 단계 상태 |
 | Phase 4G 캡처 관찰 가능성 | 구현 완료·릴리스 게시 | 미응답·경계·잘림·불완전 입력 구분 |
 | Phase 4I EAPOL M1~M4 순서 | 구현 완료·릴리스 게시 | `v0.11.0-alpha.1` |
-| Phase 4J Replay Counter 관계 | 구현 완료·`main` 병합 | `v0.12.0-alpha.1` 릴리스 확인 필요 |
-| Phase 4K PCAPNG 인터페이스 통계 | 구현 완료·Windows/Portable 검증 중 | PR #18 |
-| `v0.13.0-alpha.1` | Phase 4K 검증·병합 후 게시 예정 | Portable 실제 PCAPNG 게이트 |
+| Phase 4J Replay Counter 관계 | 구현 완료·릴리스 게시 확인 | [v0.12.0-alpha.1](https://github.com/sebia1993/wlan-troubleshooter-ko/releases/tag/v0.12.0-alpha.1) |
+| Phase 4K PCAPNG 인터페이스 통계 | `main` 병합·Windows/Portable CI 성공 이력 | [Windows CI](https://github.com/sebia1993/wlan-troubleshooter-ko/actions/runs/33970543169), [Portable](https://github.com/sebia1993/wlan-troubleshooter-ko/actions/runs/33970543170) |
+| `v0.13.0-alpha.1` | 공개 사전릴리스 게시 확인 | [릴리스](https://github.com/sebia1993/wlan-troubleshooter-ko/releases/tag/v0.13.0-alpha.1), 자산 다운로드 후 해시 확인 필요 |
 | 캡처 상대 시간·장애 구간 포함성 | 미착수 | 다음 Phase 후보 |
 | 로밍·Radiotap RF 분석 | 미착수 | 후속 범위 |
 | 오프라인 HTML 보고서 | 미착수 | 상관 정확도 안정화 이후 |
