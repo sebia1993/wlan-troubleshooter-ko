@@ -1,5 +1,7 @@
 # Codex 구현 계획서
 
+> 아래 내용은 Phase 0·1 당시의 초기 계획 기록입니다. 현재 구현·후속 승인 범위는 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), [AGENTS.md](AGENTS.md), 각 Phase 계획을 확인하십시오. 아래의 “Phase 2 시작 금지” 문구를 현재 구현 상태로 해석하지 않습니다.
+
 ## 1. 문서 목적
 
 이 문서는 `wlan-troubleshooter-ko`의 구현 범위와 완료 기준을 고정합니다. 현재 실행 지시는 Phase 0과 Phase 1만 대상으로 하며, Phase 2는 명시적으로 중단 상태입니다.
