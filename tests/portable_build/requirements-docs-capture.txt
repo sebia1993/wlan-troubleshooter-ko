@@ -1,0 +1,2 @@
+# Documentation workflow only. Never included in the product runtime/package.
+Pillow==12.3.0
