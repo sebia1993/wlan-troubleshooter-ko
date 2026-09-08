@@ -16,7 +16,9 @@ from pathlib import Path
 from tkinter import ttk
 from unittest.mock import patch
 
-from capture_windows import block_network, capture_window, write_manifest
+from capture_windows import (
+    block_network, capture_window, prepare_capture_desktop, write_manifest,
+)
 from generate_event_fixture import build_pcap
 from generate_pcapng_statistics_fixture import build_pcapng
 
@@ -28,6 +30,7 @@ def main() -> int:
     args = parser.parse_args()
     if os.name != 'nt':
         raise RuntimeError('Use the Windows documentation capture workflow')
+    prepare_capture_desktop()
     block_network()
     from wlan_troubleshooter_ko.tshark.manifest import verify_bundle
     from wlan_troubleshooter_ko.tshark.status import inspect_bundle
@@ -40,6 +43,7 @@ def main() -> int:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()
+    root.maxsize(1920, 1400)
     root.geometry('1280x960+10+10')
     ttk.Style(root).configure('Accent.TLabel', foreground='#146c43')
     window = MainWindow(root)
