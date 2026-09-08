@@ -1,0 +1,49 @@
+{
+  "application": "WLAN Troubleshooter KO",
+  "application_version": "Phase 4K source UI",
+  "source_commit": "dbbb7d6006b7d34be7435e44da758558a7df6379",
+  "capture_os": "Windows-2025Server-10.0.26100-SP0",
+  "python": "3.13.15",
+  "method": "Production Tk MainWindow; real analysis of generated local PCAP/PCAPNG; Win32 client capture",
+  "data": "synthetic documentation fixtures only",
+  "network": "socket connection attempts blocked; no device or account access",
+  "workflow_run": "34176417977",
+  "images": [
+    {
+      "file": "01-ready.png",
+      "sha256": "dbbf8cd15f4ee0137b6cad1bb9e2c9642983c86b27ee703243429569f9c8562e"
+    },
+    {
+      "file": "02-analyzing.png",
+      "sha256": "b177f5acf4fde7df13e9de2a981d6f77e8af6484193610cbce653447fd4ee932"
+    },
+    {
+      "file": "03-findings.png",
+      "sha256": "d1e4428afcfb6889c1c1df27230b7ae975b95e23fd29b78102ed0ff21dc5d02d"
+    },
+    {
+      "file": "04-device-journey.png",
+      "sha256": "1570d5429d9bf16e0515f471147fc2a8ef689d294b61450198fcf0f88a91ea8e"
+    },
+    {
+      "file": "05-interface-statistics.png",
+      "sha256": "f81a5c5d4c6fbd245e9729dff8006bf28d349aa04c3a5277544ef4f8d43579d2"
+    },
+    {
+      "file": "06-rejected-input.png",
+      "sha256": "4d1e1191cd6608fef1c67309a1a3b71447d4640e283f01cb71c4037d1d9c0579"
+    }
+  ],
+  "tshark_version": "4.6.8",
+  "vendor_release": "v0.13.0-alpha.1",
+  "fixtures": [
+    {
+      "generator": "generate_event_fixture.py",
+      "sha256": "acce2c0cdf206838268713f4963a69a54d7d087ea30ca654ffffe00d4df9d146"
+    },
+    {
+      "generator": "generate_pcapng_statistics_fixture.py",
+      "sha256": "4f0a7a32c8990ed82de049dfdfef2a0b29cd772dbcb76f77d3f7c3f3769a148e"
+    }
+  ]
+}
