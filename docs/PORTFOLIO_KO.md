@@ -1,12 +1,12 @@
 # 오프라인 PCAP 분석: 설계와 검증의 범위
 
-검토 기준은 2026-09-08의 공개 기본 브랜치 소스 `60667abeb89b1ebf1fdb04a9861083081aa83f21`입니다. 이 문서는 구현된 보안·관측 경계와 아직 해결할 정확도 문제를 함께 설명합니다. 현장 진단 정확도, 조사 시간 절감, 운영 배포 규모는 측정된 근거가 없습니다.
+검토 기준은 공개 기본 브랜치와 각 변경 PR의 실제 코드·Actions 결과입니다. 이 문서는 구현된 보안·관측 경계와 과거에 재현된 정확도 반례, 그에 대한 회귀 방어를 함께 설명합니다. 현장 진단 정확도, 조사 시간 절감, 운영 배포 규모는 측정된 근거가 없습니다.
 
 ## 사례: “DNS가 안 된다”는 신고를 받은 경우
 
 먼저 캡처 형식·잘림·관찰 가능 계층을 확인합니다. DNS 오류 응답이 있으면 RCODE와 근거 프레임을 제시하지만, 응답을 못 본 것만으로 서버 실패를 확정하지 않습니다. 짧은 캡처, 한쪽 방향 수집, 패킷 상한 때문에 같은 결과가 나타날 수 있기 때문입니다.
 
-사용자는 Finding의 `frame.number` 필터로 원본을 다시 확인합니다. 현재 버전의 거래 완결성·단말 연결 요약에는 아래 알려진 제한이 있으므로 원본 검토를 생략하는 자동 판정에 사용하지 않습니다.
+사용자는 Finding의 `frame.number` 필터로 원본을 다시 확인합니다. 자동 상관 결과는 아래 회귀 테스트를 통과하더라도 실제 캡처의 모든 오탐·미탐을 배제하지 못하므로 원본 검토를 생략하는 자동 판정에 사용하지 않습니다.
 
 ## 설계 판단에서 구현까지
 
@@ -36,18 +36,28 @@ $env:PYTHONPATH = (Join-Path (Get-Location) 'src')
 
 macOS에서 소스 테스트를 보조 실행할 때 `/var` 등 symlink가 포함된 임시 경로는 파일 경계 검사에 거부될 수 있습니다. 실제 경로인 `TMPDIR=/private/tmp`를 지정해 검증하되 Windows 검증으로 표현하지 않습니다.
 
-## 알려진 상관 정확도 제한
+## 상관 정확도 회귀 검증
 
-아래 두 반례는 위 기준 소스의 기존 테스트 입력 생성기를 이용해 2026-09-08 macOS·CPython 3.13에서 재현했습니다. 실제 PCAP·장비 통신은 사용하지 않았습니다.
+2026-09-08 기준 소스 `60667abeb89b1ebf1fdb04a9861083081aa83f21`에서는 아래 두 합성 반례가 재현됐습니다. 실제 PCAP·장비 통신은 사용하지 않았습니다.
 
-| 합성 입력 | 관찰 결과 | 필요한 판정과 영향 |
+| 과거 합성 반례 | 과거 관찰 결과 | 현재 방어 |
 |---|---|---|
-| 같은 TCP stream에 SYN=1, ACK=1인 프레임 두 개만 입력 | TCP 단계 `success`, “TCP 3-way Handshake 순서”와 프레임 1·2 표시 | 최초 SYN과 SYN=0인 최종 ACK가 없어 연결 성공을 확정할 수 없음 |
-| DNS query와 response의 ID는 7로 같고 UDP stream은 각각 1·2 | `DNS-1-A1` 거래가 `complete` | 서로 다른 거래를 묶을 수 있으므로 stream·방향·시도 경계 검증 필요 |
+| 같은 TCP stream에 `SYN=1, ACK=1`인 프레임 두 개만 입력 | TCP 단계 `success`, “TCP 3-way Handshake 순서” 표시 | 같은 stream의 `SYN(ACK 아님) → SYN+ACK → ACK(SYN 아님, RST 아님)`가 모두 있어야 성공 |
+| DNS query와 response의 ID는 7로 같고 UDP stream은 각각 1·2 | 서로 다른 거래를 하나의 완결 거래로 묶을 수 있음 | transport stream과 DNS ID를 함께 상관 키로 사용 |
 
-첫 번째는 [event_correlation.py](../src/wlan_troubleshooter_ko/analysis/event_correlation.py)의 최종 ACK 분기, 두 번째는 [event_timeline.py](../src/wlan_troubleshooter_ko/analysis/event_timeline.py)의 DNS 별칭 생성과 [transaction_sessions.py](../src/wlan_troubleshooter_ko/analysis/transaction_sessions.py) 연결 경로에서 확인할 수 있습니다. DNS 단계 집계의 stream 구분과 거래 타임라인의 별칭 경계는 별개입니다.
+TCP 회귀 방어는 [event_correlation.py](../src/wlan_troubleshooter_ko/analysis/event_correlation.py)와 [test_event_correlation.py](../tests/test_event_correlation.py)에 고정했습니다. 다음 사례를 각각 검증합니다.
 
-TCP 반례는 기존 테스트 helper로 다음처럼 재현할 수 있습니다. 위 환경 설정 후 저장소 루트에서 PowerShell로 실행합니다.
+- `SYN+ACK, SYN+ACK`만 관찰: 성공 금지
+- `SYN, SYN+ACK, ACK`: 성공 유지
+- `SYN, SYN+ACK, SYN+ACK, ACK`: 반복 SYN+ACK를 최종 ACK로 보지 않고 마지막 순수 ACK에서만 성공
+- `SYN+ACK, ACK`: 최초 순수 SYN이 없으므로 성공 금지
+- `SYN, SYN+ACK`: 최종 순수 ACK가 없으므로 성공 금지
+
+TCP 성공 근거는 같은 `tcp.stream` 안에서만 누적합니다. RST가 설정된 ACK는 최종 ACK로 사용하지 않습니다. 이 방어는 합성 상관 반례를 막는 검증이며, 실제 TCP 연결의 모든 변형·캡처 손실·중간 캡처 시작을 완전하게 해석한다는 보장은 아닙니다.
+
+DNS 단계 집계와 거래 타임라인은 별개 계층입니다. transport stream과 DNS ID를 함께 사용하더라도 재전송, TCP 기반 DNS, 캡처 경계와 실제 클라이언트 귀속은 근거 프레임과 함께 검토해야 합니다.
+
+과거 TCP 반례는 다음 형태였습니다.
 
 ```powershell
 @'
@@ -68,11 +78,11 @@ print([(s.state, s.evidence_frames) for s in r.stages if s.stage_id == 'tcp'])
 '@ | .\.venv\Scripts\python.exe -
 ```
 
-기준 버전의 출력은 `[('success', (1, 2))]`로 잘못된 성공 판정을 보여 줍니다. 수정 버전에서는 이 결과가 달라져야 하며, 반례 회귀·전체 Windows·Portable 검증을 함께 갱신해야 합니다. 2026-09-08 확인 당시 [PR #19](https://github.com/sebia1993/wlan-troubleshooter-ko/pull/19)는 별도 진행 중이었으며 이 문서는 해당 브랜치의 수정 완료를 주장하지 않습니다.
+과거 기준 버전은 이 입력을 잘못된 성공으로 표시했습니다. 현재 회귀 테스트는 동일한 형태의 입력이 `success`가 되지 않는 것을 검증합니다.
 
 ## 검증 증거와 다음 우선순위
 
-- 기준 소스의 [Windows CI 실행](https://github.com/sebia1993/wlan-troubleshooter-ko/actions/runs/33970543169)과 [Portable 릴리스 실행](https://github.com/sebia1993/wlan-troubleshooter-ko/actions/runs/33970543170)은 성공 이력입니다. 자동 검증이 위 반례까지 보장하지는 않습니다.
-- [v0.13.0-alpha.1](https://github.com/sebia1993/wlan-troubleshooter-ko/releases/tag/v0.13.0-alpha.1)은 공개 사전릴리스입니다. 릴리스 자산의 SHA-256과 실제 내려받은 파일을 비교해야 합니다.
-- 우선순위는 TCP·DNS 거래 경계 및 DHCP Relay의 단말 귀속 검토 → 대표 장애 5~10건의 Wireshark 대조 → 검색·구간 선택·단일 HTML 보고서 순서입니다. 이 항목은 완료 내역이 아닌 후속 제안입니다.
+- TCP 상관 수정 PR의 Windows CI는 전체 오프라인 검증과 새 회귀 테스트를 포함해야 하며, Python 없는 Portable 빌드는 별도로 성공해야 병합합니다.
+- [v0.13.0-alpha.1](https://github.com/sebia1993/wlan-troubleshooter-ko/releases/tag/v0.13.0-alpha.1)은 기존 공개 사전릴리스입니다. 소스 수정이 병합돼도 새 릴리스가 발행되기 전까지 기존 릴리스 바이너리가 자동으로 바뀌지는 않습니다.
+- 다음 정확도 우선순위는 DHCP Relay의 단말 귀속 검토 → 대표 장애 5~10건의 Wireshark 대조 → 검색·구간 선택·단일 HTML 보고서 순서입니다. 이 항목은 완료 내역이 아닌 후속 제안입니다.
 - Radiotap이 없으면 RF를, RADIUS가 없으면 ClearPass 결과를 판단할 수 없습니다. ISB 드롭 0·통계 부재는 무손실 증거가 아니며, 양수 드롭도 특정 시스템의 원인 증거가 아닙니다.
