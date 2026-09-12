@@ -14,7 +14,7 @@ Windows 11에서 PCAP·PCAPNG를 외부로 보내지 않고 로컬에서 분석�
 | 사내 데이터 반출 경로와 식별정보 제한 | [오프라인 ADR](docs/adr/0001-no-ai-and-no-network.md), [실행별 가명 ADR](docs/adr/0004-analysis-scoped-device-pseudonyms.md) |
 | 검증과 배포 추적 | [Windows CI](https://github.com/sebia1993/wlan-troubleshooter-ko/actions/workflows/windows-ci.yml), [공개 릴리스](https://github.com/sebia1993/wlan-troubleshooter-ko/releases) |
 
-**알려진 정확도 제한:** `60667ab` 소스에서 SYN/ACK 반복을 TCP 연결 성공으로 표시하고, 서로 다른 UDP stream의 같은 DNS ID를 완결 거래로 묶는 합성 반례가 재현됐습니다. [적용 버전·재현 조건·후속 검증](docs/PORTFOLIO_KO.md#알려진-상관-정확도-제한)을 확인하고 성공·완결 요약은 근거 프레임과 함께 검토하십시오. 이 문서 개선에는 분석 엔진 수정이 포함되지 않습니다.
+**상관 정확도 회귀 방어:** 과거 `60667ab` 소스에서는 반복 SYN/ACK가 TCP 연결 성공으로 잘못 표시되는 합성 반례가 재현됐습니다. 현재 코드는 동일 `tcp.stream`에서 순수 SYN → SYN+ACK → 순수 ACK 순서가 모두 관찰될 때만 TCP 3-way Handshake 성공으로 표시하며, 반복 SYN/ACK·최초 SYN 부재·최종 ACK 부재를 성공으로 처리하지 않는 회귀 테스트를 유지합니다. DNS 거래도 transport stream과 DNS ID를 함께 사용해 서로 다른 stream을 같은 거래로 묶지 않습니다. 실제 현장 캡처의 오탐·미탐은 별도 검증이 필요하므로 성공·완결 요약은 근거 프레임과 함께 검토하십시오.
 
 ## 실제 화면과 사용 흐름
 
@@ -70,6 +70,8 @@ DNS 이름 조회
 ARP 주소 확인
 TCP 연결
 ```
+
+TCP 연결 성공은 같은 `tcp.stream`에서 **SYN(ACK 아님) → SYN+ACK → ACK(SYN 아님, RST 아님)** 순서가 모두 관찰된 경우에만 표시합니다. 반복 SYN+ACK, 최초 SYN이 없는 캡처, 최종 ACK가 없는 캡처는 3-way Handshake 성공으로 확정하지 않습니다.
 
 명시적 패킷 결과가 있을 때만 다음 Finding을 만듭니다.
 
