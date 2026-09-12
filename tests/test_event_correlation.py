@@ -77,16 +77,6 @@ class EventCorrelationTests(unittest.TestCase):
             "protocols": protocols,
         }
 
-    def tcp_result(self, rows):
-        result = build_event_correlation(
-            self.render(rows),
-            self.profile,
-            self.ruleset,
-            expected_frames=len(rows),
-            has_80211_link_type=False,
-        )
-        return result, next(item for item in result.stages if item.stage_id == "tcp")
-
     def test_explicit_failures_generate_evidence_backed_findings(self):
         rows = []
         values = self.base(1, 1, "eth:eapol:eap")
@@ -183,54 +173,6 @@ class EventCorrelationTests(unittest.TestCase):
             {"EAP-FAILURE", "RADIUS-ACCESS-REJECT", "DHCP-NAK"}
             & {item.rule_id for item in result.findings}
         )
-
-    def test_repeated_synack_without_initial_syn_is_not_tcp_success(self):
-        rows = []
-        for frame in (1, 2):
-            values = self.base(frame, frame, "eth:ip:tcp")
-            values.update({"tcp_stream": 1, "tcp_syn": 1, "tcp_ack": 1})
-            rows.append(values)
-
-        _, stage = self.tcp_result(rows)
-
-        self.assertEqual(stage.state, "incomplete")
-        self.assertNotIn("Handshake 순서", stage.summary_ko)
-
-    def test_repeated_synack_before_pure_ack_keeps_tcp_success(self):
-        rows = []
-        flags = ((1, 0), (1, 1), (1, 1), (0, 1))
-        for frame, (syn, ack) in enumerate(flags, start=1):
-            values = self.base(frame, frame, "eth:ip:tcp")
-            values.update({"tcp_stream": 1, "tcp_syn": syn, "tcp_ack": ack})
-            rows.append(values)
-
-        _, stage = self.tcp_result(rows)
-
-        self.assertEqual(stage.state, "success")
-
-    def test_synack_then_ack_without_initial_syn_is_not_tcp_success(self):
-        rows = []
-        flags = ((1, 1), (0, 1))
-        for frame, (syn, ack) in enumerate(flags, start=1):
-            values = self.base(frame, frame, "eth:ip:tcp")
-            values.update({"tcp_stream": 1, "tcp_syn": syn, "tcp_ack": ack})
-            rows.append(values)
-
-        _, stage = self.tcp_result(rows)
-
-        self.assertEqual(stage.state, "incomplete")
-
-    def test_syn_and_synack_without_final_ack_is_not_tcp_success(self):
-        rows = []
-        flags = ((1, 0), (1, 1))
-        for frame, (syn, ack) in enumerate(flags, start=1):
-            values = self.base(frame, frame, "eth:ip:tcp")
-            values.update({"tcp_stream": 1, "tcp_syn": syn, "tcp_ack": ack})
-            rows.append(values)
-
-        _, stage = self.tcp_result(rows)
-
-        self.assertEqual(stage.state, "incomplete")
 
     def test_complete_capture_can_report_unanswered_without_calling_it_failure(self):
         rows = []

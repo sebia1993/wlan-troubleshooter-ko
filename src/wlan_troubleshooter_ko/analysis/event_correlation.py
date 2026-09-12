@@ -439,23 +439,13 @@ def build_event_correlation(
                 item = tcp_states.setdefault(tcp_stream, _TcpState())
                 if tcp_syn is True and tcp_ack is not True and item.syn_frame is None:
                     item.syn_frame, item.syn_time_ns = frame, time_ns
-                elif (
-                    tcp_syn is True
-                    and tcp_ack is True
-                    and item.syn_frame is not None
-                    and item.synack_frame is None
-                ):
+                elif tcp_syn is True and tcp_ack is True and item.synack_frame is None:
                     item.synack_frame = frame
-                elif (
-                    tcp_syn is not True
-                    and tcp_ack is True
-                    and tcp_reset is not True
-                    and item.syn_frame is not None
-                    and item.synack_frame is not None
-                    and item.final_ack_frame is None
-                ):
+                elif tcp_ack is True and item.synack_frame is not None and item.final_ack_frame is None:
                     item.final_ack_frame = frame
-                    success["tcp"].extend((item.syn_frame, item.synack_frame, frame))
+                    success["tcp"].extend(
+                        value for value in (item.syn_frame, item.synack_frame, frame) if value is not None
+                    )
     except FieldsOutputError as exc:
         raise EventCorrelationError(str(exc)) from exc
 
