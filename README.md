@@ -51,6 +51,8 @@ ARP 주소 확인
 TCP 연결
 ```
 
+TCP 연결 성공은 같은 `tcp.stream`에서 **SYN(ACK 아님) → SYN+ACK → ACK(SYN 아님, RST 아님)** 순서가 모두 관찰된 경우에만 표시합니다. 반복 SYN+ACK, 최초 SYN이 없는 캡처, 최종 ACK가 없는 캡처는 3-way Handshake 성공으로 확정하지 않습니다.
+
 명시적 패킷 결과가 있을 때만 다음 Finding을 만듭니다.
 
 | Finding | 패킷 근거 |
